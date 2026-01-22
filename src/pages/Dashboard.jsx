@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import { Fuel, Gauge, Tractor, ArrowUpRight, ArrowRight, Building2, MapPin, X, Users, DollarSign, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { processMonthlyData } from '../utils/dataProcessor';
 import { fetchVehicleSettings, fetchStationSettings } from '../utils/firebaseService';
@@ -18,20 +18,16 @@ const formatCompact = (num, isCurrency = false) => {
   return formatter.format(num);
 };
 
-// Función de ordenamiento genérica
 const sortData = (data, config) => {
   if (!config.key) return data;
-
   return [...data].sort((a, b) => {
     let aValue = a[config.key];
     let bValue = b[config.key];
-
-    // Manejo especial para fechas (DD/MM/YYYY o YYYY-MM-DD)
     if (config.key === 'fecha') {
       const parseDate = (dateStr) => {
         if (!dateStr) return 0;
         if (dateStr.includes('/')) {
-          const parts = dateStr.split(' ')[0].split('/'); // Quitar hora si existe
+          const parts = dateStr.split(' ')[0].split('/'); 
           if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
         }
         return new Date(dateStr).getTime();
@@ -39,37 +35,81 @@ const sortData = (data, config) => {
       aValue = parseDate(aValue);
       bValue = parseDate(bValue);
     }
-
     if (aValue < bValue) return config.direction === 'asc' ? -1 : 1;
     if (aValue > bValue) return config.direction === 'asc' ? 1 : -1;
     return 0;
   });
 };
 
-// Componente de Encabezado Ordenable
+// --- TOOLTIPS PERSONALIZADOS (LETRAS MÁS GRANDES) ---
+
+const CustomBarTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-4 border border-gray-200 shadow-xl rounded-xl min-w-[180px] z-50">
+        <p className="text-base font-bold text-gray-800 mb-3 border-b border-gray-100 pb-2">{data.fullName}</p>
+        <div className="space-y-2">
+          <div className="flex justify-between items-center gap-4">
+            <span className="text-sm text-gray-500 font-medium">Consumo:</span>
+            <span className="text-sm font-bold text-gray-800">{data.litros.toLocaleString('es-AR')} L</span>
+          </div>
+          <div className="flex justify-between items-center gap-4">
+            <span className="text-sm text-gray-500 font-medium">Gasto:</span>
+            <span className="text-sm font-bold text-jd-green">${data.costo.toLocaleString('es-AR')}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+const CustomPieTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-4 border border-gray-200 shadow-xl rounded-xl min-w-[180px] z-50">
+        <div className="flex items-center gap-2 mb-3 border-b border-gray-100 pb-2">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: data.fill }}></div>
+          <p className="text-base font-bold text-gray-800">{data.name}</p>
+        </div>
+        <div className="space-y-2">
+          <div className="flex justify-between items-center gap-4">
+            <span className="text-sm text-gray-500 font-medium">Participación:</span>
+            <span className="text-sm font-bold text-gray-800">{data.share}%</span>
+          </div>
+          <div className="flex justify-between items-center gap-4">
+            <span className="text-sm text-gray-500 font-medium">Litros:</span>
+            <span className="text-sm font-bold text-gray-800">{formatCompact(data.value)} L</span>
+          </div>
+          <div className="flex justify-between items-center gap-4">
+            <span className="text-sm text-gray-500 font-medium">Gasto:</span>
+            <span className="text-sm font-bold text-jd-green">{formatCompact(data.costo, true)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+// --- COMPONENTES UI ---
+
 const SortableHeader = ({ label, sortKey, currentConfig, onSort, align = 'left' }) => {
   const isActive = currentConfig.key === sortKey;
-  
   return (
-    <th 
-      className={`p-4 cursor-pointer hover:bg-gray-100 transition-colors select-none text-${align} ${align === 'right' ? 'pr-6' : 'pl-6'}`}
-      onClick={() => onSort(sortKey)}
-    >
+    <th className={`p-4 cursor-pointer hover:bg-gray-100 transition-colors select-none text-${align} ${align === 'right' ? 'pr-6' : 'pl-6'}`} onClick={() => onSort(sortKey)}>
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
         {label}
         <div className="text-gray-400">
-          {isActive ? (
-            currentConfig.direction === 'asc' ? <ArrowUp size={14} className="text-jd-green"/> : <ArrowDown size={14} className="text-jd-green"/>
-          ) : (
-            <ArrowUpDown size={14} className="opacity-50"/>
-          )}
+          {isActive ? (currentConfig.direction === 'asc' ? <ArrowUp size={14} className="text-jd-green"/> : <ArrowDown size={14} className="text-jd-green"/>) : (<ArrowUpDown size={14} className="opacity-50"/>)}
         </div>
       </div>
     </th>
   );
 };
 
-// --- COMPONENTE KPICard ---
 const KPICard = ({ title, value, subtext, icon: Icon, trend, trendValue, iconColor }) => (
   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:border-jd-green/30 transition-colors">
     <div className="flex justify-between items-start mb-4">
@@ -90,7 +130,8 @@ const KPICard = ({ title, value, subtext, icon: Icon, trend, trendValue, iconCol
   </div>
 );
 
-// --- MODAL: RANKING VEHÍCULOS ---
+// --- MODALES ---
+
 const AllVehiclesModal = ({ isOpen, onClose, vehicles, maxLitros }) => {
   if (!isOpen) return null;
   return (
@@ -134,44 +175,27 @@ const AllVehiclesModal = ({ isOpen, onClose, vehicles, maxLitros }) => {
   );
 };
 
-// --- MODAL: HISTORIAL COMPLETO DE CARGAS ---
 const FullHistoryModal = ({ isOpen, onClose, data }) => {
   const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
-
-  const handleSort = (key) => {
-    setSortConfig(current => ({
-      key,
-      direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
-    }));
-  };
-
   const sortedData = useMemo(() => sortData(data, sortConfig), [data, sortConfig]);
-
   if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col animate-in fade-in zoom-in duration-200">
         <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-xl">
-          <div>
-            <h3 className="text-xl font-bold text-gray-800">Historial Completo de Cargas</h3>
-            <p className="text-sm text-gray-500">{data.length} registros totales</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500">
-            <X size={24} />
-          </button>
+          <div><h3 className="text-xl font-bold text-gray-800">Historial Completo de Cargas</h3><p className="text-sm text-gray-500">{data.length} registros totales</p></div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500"><X size={24} /></button>
         </div>
-        
         <div className="flex-1 overflow-y-auto p-0">
           <table className="w-full text-left text-sm">
             <thead className="bg-white text-gray-500 font-semibold border-b border-gray-200 sticky top-0 z-10 shadow-sm">
               <tr>
-                <SortableHeader label="Fecha" sortKey="fecha" currentConfig={sortConfig} onSort={handleSort} />
-                <SortableHeader label="Unidad" sortKey="unidad" currentConfig={sortConfig} onSort={handleSort} />
-                <SortableHeader label="Conductor" sortKey="conductor" currentConfig={sortConfig} onSort={handleSort} />
-                <SortableHeader label="Estación" sortKey="estacion" currentConfig={sortConfig} onSort={handleSort} />
-                <SortableHeader label="Litros" sortKey="litros" currentConfig={sortConfig} onSort={handleSort} align="right" />
-                <SortableHeader label="Costo (M.N.)" sortKey="costo" currentConfig={sortConfig} onSort={handleSort} align="right" />
+                <SortableHeader label="Fecha" sortKey="fecha" currentConfig={sortConfig} onSort={handleSort => setSortConfig(c => ({ key: handleSort, direction: c.key === handleSort && c.direction === 'desc' ? 'asc' : 'desc' }))} />
+                <SortableHeader label="Unidad" sortKey="unidad" currentConfig={sortConfig} onSort={handleSort => setSortConfig(c => ({ key: handleSort, direction: c.key === handleSort && c.direction === 'desc' ? 'asc' : 'desc' }))} />
+                <SortableHeader label="Conductor" sortKey="conductor" currentConfig={sortConfig} onSort={handleSort => setSortConfig(c => ({ key: handleSort, direction: c.key === handleSort && c.direction === 'desc' ? 'asc' : 'desc' }))} />
+                <SortableHeader label="Estación" sortKey="estacion" currentConfig={sortConfig} onSort={handleSort => setSortConfig(c => ({ key: handleSort, direction: c.key === handleSort && c.direction === 'desc' ? 'asc' : 'desc' }))} />
+                <SortableHeader label="Litros" sortKey="litros" currentConfig={sortConfig} onSort={handleSort => setSortConfig(c => ({ key: handleSort, direction: c.key === handleSort && c.direction === 'desc' ? 'asc' : 'desc' }))} align="right" />
+                <SortableHeader label="Costo (M.N.)" sortKey="costo" currentConfig={sortConfig} onSort={handleSort => setSortConfig(c => ({ key: handleSort, direction: c.key === handleSort && c.direction === 'desc' ? 'asc' : 'desc' }))} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -188,10 +212,7 @@ const FullHistoryModal = ({ isOpen, onClose, data }) => {
             </tbody>
           </table>
         </div>
-        
-        <div className="p-4 border-t border-gray-200 text-right bg-gray-50 rounded-b-xl">
-          <button onClick={onClose} className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-100">Cerrar</button>
-        </div>
+        <div className="p-4 border-t border-gray-200 text-right bg-gray-50 rounded-b-xl"><button onClick={onClose} className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-100">Cerrar</button></div>
       </div>
     </div>
   );
@@ -203,8 +224,6 @@ const Dashboard = ({ data, kpis }) => {
   const [stationSettings, setStationSettings] = useState({});
   const [isVehiclesModalOpen, setIsVehiclesModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  
-  // Estado para el ordenamiento de la tabla pequeña (Preview)
   const [previewSortConfig, setPreviewSortConfig] = useState({ key: 'fecha', direction: 'desc' });
 
   useEffect(() => {
@@ -237,7 +256,8 @@ const Dashboard = ({ data, kpis }) => {
   const fullVehicleList = useMemo(() => {
     if (!hasRealData) return [];
     
-    // Calculamos costos por unidad
+    // Calcular costo por unidad (ya que kpis.topConsumers solo trae litros en la versión actual del helper, 
+    // pero si dataProcessor ya trae costos, mejor recalcularlo aquí para estar seguros)
     const costsByUnit = {};
     data.forEach(row => {
         if (!costsByUnit[row.unidad]) costsByUnit[row.unidad] = 0;
@@ -279,6 +299,8 @@ const Dashboard = ({ data, kpis }) => {
   // Centro de costos
   const costCenterData = useMemo(() => {
     if (!hasRealData) return { byCenter: [], byLocation: [] };
+    
+    // Mapas para acumular litros y costos
     const centerMap = {};
     const locationMap = {};
     let totalLitrosFiltered = 0;
@@ -289,15 +311,26 @@ const Dashboard = ({ data, kpis }) => {
       const center = config.centroCosto || 'Sin Asignar';
       const location = config.localidad || 'Sin Asignar';
 
-      if (!centerMap[center]) centerMap[center] = 0;
-      centerMap[center] += row.litros;
-      if (!locationMap[location]) locationMap[location] = 0;
-      locationMap[location] += row.litros;
+      // Acumular Centro de Costo
+      if (!centerMap[center]) centerMap[center] = { litros: 0, costo: 0 };
+      centerMap[center].litros += row.litros;
+      centerMap[center].costo += row.costo;
+
+      // Acumular Localidad
+      if (!locationMap[location]) locationMap[location] = { litros: 0, costo: 0 };
+      locationMap[location].litros += row.litros;
+      locationMap[location].costo += row.costo;
+      
       totalLitrosFiltered += row.litros;
     });
 
     const formatData = (map) => Object.entries(map)
-      .map(([name, value]) => ({ name, value, share: ((value / totalLitrosFiltered) * 100).toFixed(1) }))
+      .map(([name, data]) => ({ 
+        name, 
+        value: data.litros, // Recharts usa 'value' para el tamaño del slice
+        costo: data.costo,  // Pasamos costo para el tooltip
+        share: ((data.litros / totalLitrosFiltered) * 100).toFixed(1) 
+      }))
       .sort((a, b) => b.value - a.value);
 
     return { byCenter: formatData(centerMap), byLocation: formatData(locationMap) };
@@ -305,6 +338,7 @@ const Dashboard = ({ data, kpis }) => {
 
   const COLORS = ['#367C2B', '#F59E0B', '#3B82F6', '#EF4444', '#131614', '#9CA3AF'];
 
+  // Render Label
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
@@ -314,7 +348,6 @@ const Dashboard = ({ data, kpis }) => {
     return <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={11} fontWeight="bold">{`${(percent * 100).toFixed(1)}%`}</text>;
   };
 
-  // --- LÓGICA DE ORDENAMIENTO TABLA PREVIEW ---
   const handlePreviewSort = (key) => {
     setPreviewSortConfig(current => ({
       key,
@@ -324,12 +357,8 @@ const Dashboard = ({ data, kpis }) => {
 
   const previewTableData = useMemo(() => {
     if (!hasRealData) return [];
-    // Ordenar toda la data
-    const sorted = sortData(data, previewSortConfig);
-    // Mostrar solo los primeros 8 del orden actual
-    return sorted.slice(0, 8);
+    return sortData(data, previewSortConfig).slice(0, 8);
   }, [data, hasRealData, previewSortConfig]);
-
 
   return (
     <div className="p-8 space-y-6 max-w-[1600px] mx-auto">
@@ -344,6 +373,7 @@ const Dashboard = ({ data, kpis }) => {
 
       {/* GRILLA PRINCIPAL */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Gráfico Barras */}
         <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-bold text-gray-800">Consumo Mensual</h3>
@@ -352,15 +382,15 @@ const Dashboard = ({ data, kpis }) => {
           <div className="h-[350px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} barSize={40}>
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 12}} dy={10} />
-                <Tooltip cursor={{fill: '#f4f4f5'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} 
-                  formatter={(value, name) => [name === 'costo' ? formatCompact(value, true) : `${formatCompact(value)} L`, name === 'costo' ? 'Gasto' : 'Consumo']} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#9CA3AF', fontSize: 13}} dy={10} />
+                <Tooltip cursor={{fill: '#f4f4f5'}} content={<CustomBarTooltip />} />
                 <Bar dataKey="litros" fill="#367C2B" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
+        {/* Top Vehículos */}
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col h-[450px]">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold text-gray-800">Mayor Consumo</h3>
@@ -395,7 +425,7 @@ const Dashboard = ({ data, kpis }) => {
         </div>
       </div>
 
-      {/* GRÁFICOS CIRCULARES */}
+      {/* Gráficos Circulares */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2"><Building2 className="text-jd-green" size={20}/> Consumo por Centro de Costo</h3>
@@ -407,7 +437,7 @@ const Dashboard = ({ data, kpis }) => {
                   <Pie data={costCenterData.byCenter} cx="50%" cy="50%" innerRadius={60} outerRadius={100} fill="#8884d8" paddingAngle={2} dataKey="value" labelLine={false} label={renderCustomizedLabel}>
                     {costCenterData.byCenter.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(value, name, props) => [`${value.toLocaleString('es-AR')} L (${props.payload.share}%)`, name]} />
+                  <Tooltip content={<CustomPieTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -430,15 +460,15 @@ const Dashboard = ({ data, kpis }) => {
                 <Pie data={costCenterData.byLocation} cx="50%" cy="50%" innerRadius={0} outerRadius={100} fill="#8884d8" paddingAngle={2} dataKey="value">
                   {costCenterData.byLocation.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                 </Pie>
-                <Tooltip formatter={(value) => [`${value.toLocaleString('es-AR')} L`]} />
-                <Legend layout="vertical" verticalAlign="middle" align="right" />
+                <Tooltip content={<CustomPieTooltip />} />
+                <Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize: '12px'}} />
               </PieChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      {/* MAPA DE FLOTA */}
+      {/* Mapa */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-[500px] flex flex-col">
         <div className="mb-4">
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><MapPin className="text-jd-green" /> Mapa de Consumo</h3>
@@ -449,7 +479,7 @@ const Dashboard = ({ data, kpis }) => {
         </div>
       </div>
 
-      {/* HISTORIAL RECIENTE CON ORDENAMIENTO */}
+      {/* Historial Reciente */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-200"><h3 className="text-lg font-bold text-gray-800">Cargas Recientes</h3></div>
         <div className="overflow-x-auto">
@@ -478,18 +508,11 @@ const Dashboard = ({ data, kpis }) => {
                 </tbody>
             </table>
         </div>
-        {/* BOTÓN VER HISTORIAL COMPLETO */}
         <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-center">
-             <button 
-               onClick={() => setIsHistoryModalOpen(true)}
-               className="text-sm font-bold text-jd-green flex items-center gap-1 hover:underline"
-             >
-                Ver Historial Completo <ArrowRight size={16} />
-             </button>
+             <button onClick={() => setIsHistoryModalOpen(true)} className="text-sm font-bold text-jd-green flex items-center gap-1 hover:underline">Ver Historial Completo <ArrowRight size={16} /></button>
         </div>
       </div>
 
-      {/* MODALES */}
       <AllVehiclesModal isOpen={isVehiclesModalOpen} onClose={() => setIsVehiclesModalOpen(false)} vehicles={fullVehicleList} maxLitros={maxLitrosForModal} />
       <FullHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} data={data} />
     </div>
