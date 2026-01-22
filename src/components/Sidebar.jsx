@@ -63,13 +63,13 @@ const Sidebar = () => {
       <div className="p-4 border-t border-gray-100">
         <div className="flex items-center gap-3">
           <img 
-            src="https://i.pravatar.cc/150?img=11" 
+            src="https://res.cloudinary.com/dph379kxx/image/upload/v1757331830/SARTOR_Victor_Manuel_Ojeda_-_Gerente_de_Proyectos_vaxd6k.png" 
             alt="Usuario" 
             className="w-9 h-9 rounded-full object-cover border border-gray-200"
           />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-gray-800 truncate">Juan Pérez</p>
-            <p className="text-xs text-gray-400 truncate">Jefe de Taller</p>
+            <p className="text-sm font-bold text-gray-800 truncate">Victor Ojeda</p>
+            <p className="text-xs text-gray-400 truncate">Gerente de Proyectos</p>
           </div>
           <button className="text-gray-400 hover:text-gray-600" title="Cerrar Sesión">
             <LogOut size={18} />

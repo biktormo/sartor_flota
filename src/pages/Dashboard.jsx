@@ -1,11 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
-import { Fuel, Gauge, Tractor, ArrowUpRight, ArrowRight, Building2, MapPin, X, Users, DollarSign } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
+import { Fuel, Gauge, Tractor, ArrowUpRight, ArrowRight, Building2, MapPin, X, Users, DollarSign, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { processMonthlyData } from '../utils/dataProcessor';
 import { fetchVehicleSettings, fetchStationSettings } from '../utils/firebaseService';
 import FleetMap from '../components/FleetMap';
 
-// --- HELPER PARA FORMATO COMPACTO (1.2k, 5M) ---
+// --- HELPERS ---
+
 const formatCompact = (num, isCurrency = false) => {
   if (!num) return isCurrency ? '$0' : '0';
   const formatter = new Intl.NumberFormat('es-AR', {
@@ -17,6 +18,58 @@ const formatCompact = (num, isCurrency = false) => {
   return formatter.format(num);
 };
 
+// Función de ordenamiento genérica
+const sortData = (data, config) => {
+  if (!config.key) return data;
+
+  return [...data].sort((a, b) => {
+    let aValue = a[config.key];
+    let bValue = b[config.key];
+
+    // Manejo especial para fechas (DD/MM/YYYY o YYYY-MM-DD)
+    if (config.key === 'fecha') {
+      const parseDate = (dateStr) => {
+        if (!dateStr) return 0;
+        if (dateStr.includes('/')) {
+          const parts = dateStr.split(' ')[0].split('/'); // Quitar hora si existe
+          if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+        }
+        return new Date(dateStr).getTime();
+      };
+      aValue = parseDate(aValue);
+      bValue = parseDate(bValue);
+    }
+
+    if (aValue < bValue) return config.direction === 'asc' ? -1 : 1;
+    if (aValue > bValue) return config.direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+};
+
+// Componente de Encabezado Ordenable
+const SortableHeader = ({ label, sortKey, currentConfig, onSort, align = 'left' }) => {
+  const isActive = currentConfig.key === sortKey;
+  
+  return (
+    <th 
+      className={`p-4 cursor-pointer hover:bg-gray-100 transition-colors select-none text-${align} ${align === 'right' ? 'pr-6' : 'pl-6'}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
+        {label}
+        <div className="text-gray-400">
+          {isActive ? (
+            currentConfig.direction === 'asc' ? <ArrowUp size={14} className="text-jd-green"/> : <ArrowDown size={14} className="text-jd-green"/>
+          ) : (
+            <ArrowUpDown size={14} className="opacity-50"/>
+          )}
+        </div>
+      </div>
+    </th>
+  );
+};
+
+// --- COMPONENTE KPICard ---
 const KPICard = ({ title, value, subtext, icon: Icon, trend, trendValue, iconColor }) => (
   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:border-jd-green/30 transition-colors">
     <div className="flex justify-between items-start mb-4">
@@ -37,23 +90,16 @@ const KPICard = ({ title, value, subtext, icon: Icon, trend, trendValue, iconCol
   </div>
 );
 
-// --- MODAL DE TODOS LOS VEHÍCULOS ---
+// --- MODAL: RANKING VEHÍCULOS ---
 const AllVehiclesModal = ({ isOpen, onClose, vehicles, maxLitros }) => {
   if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col animate-in fade-in zoom-in duration-200">
         <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-xl">
-          <div>
-            <h3 className="text-xl font-bold text-gray-800">Ranking Completo de Consumo</h3>
-            <p className="text-sm text-gray-500">{vehicles.length} unidades registradas</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500">
-            <X size={24} />
-          </button>
+          <div><h3 className="text-xl font-bold text-gray-800">Ranking Completo de Consumo</h3><p className="text-sm text-gray-500">{vehicles.length} unidades registradas</p></div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500"><X size={24} /></button>
         </div>
-        
         <div className="flex-1 overflow-y-auto p-6">
           <table className="w-full text-left text-sm">
             <thead className="bg-white text-gray-500 font-semibold border-b border-gray-200 sticky top-0 z-10 shadow-sm">
@@ -71,34 +117,72 @@ const AllVehiclesModal = ({ isOpen, onClose, vehicles, maxLitros }) => {
               {vehicles.map((item, idx) => (
                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
                   <td className="p-4 text-center font-bold text-gray-400">{idx + 1}</td>
-                  <td className="p-4">
-                    <div className="font-bold text-gray-800">{item.id}</div>
-                    <div className="text-xs text-gray-500">{item.detalle}</div>
-                  </td>
-                  <td className="p-4">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-                      {item.centroCosto}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <div className="text-xs text-gray-600 max-w-[200px] truncate" title={item.conductores}>
-                      {item.conductores || '-'}
-                    </div>
-                  </td>
-                  <td className="p-4 text-right font-bold text-jd-green">
-                    {formatCompact(item.litros)} L
-                  </td>
-                  <td className="p-4 text-right font-mono text-gray-700">
-                    {formatCompact(item.costo, true)}
-                  </td>
-                  <td className="p-4">
-                    <div className="w-full bg-gray-100 rounded-full h-2">
-                      <div 
-                        className="bg-jd-green h-2 rounded-full" 
-                        style={{ width: `${(item.litros / maxLitros) * 100}%` }}
-                      ></div>
-                    </div>
-                  </td>
+                  <td className="p-4"><div className="font-bold text-gray-800">{item.id}</div><div className="text-xs text-gray-500">{item.detalle}</div></td>
+                  <td className="p-4"><span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{item.centroCosto}</span></td>
+                  <td className="p-4"><div className="text-xs text-gray-600 max-w-[200px] truncate" title={item.conductores}>{item.conductores || '-'}</div></td>
+                  <td className="p-4 text-right font-bold text-jd-green">{formatCompact(item.litros)} L</td>
+                  <td className="p-4 text-right font-mono text-gray-700">{formatCompact(item.costo, true)}</td>
+                  <td className="p-4"><div className="w-full bg-gray-100 rounded-full h-2"><div className="bg-jd-green h-2 rounded-full" style={{ width: `${(item.litros / maxLitros) * 100}%` }}></div></div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-4 border-t border-gray-200 text-right bg-gray-50 rounded-b-xl"><button onClick={onClose} className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-100">Cerrar</button></div>
+      </div>
+    </div>
+  );
+};
+
+// --- MODAL: HISTORIAL COMPLETO DE CARGAS ---
+const FullHistoryModal = ({ isOpen, onClose, data }) => {
+  const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
+
+  const handleSort = (key) => {
+    setSortConfig(current => ({
+      key,
+      direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  const sortedData = useMemo(() => sortData(data, sortConfig), [data, sortConfig]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col animate-in fade-in zoom-in duration-200">
+        <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-xl">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Historial Completo de Cargas</h3>
+            <p className="text-sm text-gray-500">{data.length} registros totales</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500">
+            <X size={24} />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-0">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-white text-gray-500 font-semibold border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+              <tr>
+                <SortableHeader label="Fecha" sortKey="fecha" currentConfig={sortConfig} onSort={handleSort} />
+                <SortableHeader label="Unidad" sortKey="unidad" currentConfig={sortConfig} onSort={handleSort} />
+                <SortableHeader label="Conductor" sortKey="conductor" currentConfig={sortConfig} onSort={handleSort} />
+                <SortableHeader label="Estación" sortKey="estacion" currentConfig={sortConfig} onSort={handleSort} />
+                <SortableHeader label="Litros" sortKey="litros" currentConfig={sortConfig} onSort={handleSort} align="right" />
+                <SortableHeader label="Costo (M.N.)" sortKey="costo" currentConfig={sortConfig} onSort={handleSort} align="right" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sortedData.map((row, idx) => (
+                <tr key={idx} className="hover:bg-green-50/30 transition-colors">
+                  <td className="p-4 pl-6 text-gray-500 font-medium whitespace-nowrap">{row.fecha}</td>
+                  <td className="p-4 font-bold text-gray-800">{row.unidad}</td>
+                  <td className="p-4 text-gray-600 text-xs">{row.conductor}</td>
+                  <td className="p-4 text-gray-500 text-xs truncate max-w-[200px]" title={row.direccion || ''}>{row.estacion}</td>
+                  <td className="p-4 text-right font-mono font-bold text-gray-700">{row.litros.toLocaleString('es-AR')} L</td>
+                  <td className="p-4 text-right text-gray-500 font-mono pr-6">${row.costo.toLocaleString('es-AR')}</td>
                 </tr>
               ))}
             </tbody>
@@ -106,21 +190,23 @@ const AllVehiclesModal = ({ isOpen, onClose, vehicles, maxLitros }) => {
         </div>
         
         <div className="p-4 border-t border-gray-200 text-right bg-gray-50 rounded-b-xl">
-          <button onClick={onClose} className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-100">
-            Cerrar
-          </button>
+          <button onClick={onClose} className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-100">Cerrar</button>
         </div>
       </div>
     </div>
   );
 };
 
-// --- DASHBOARD PRINCIPAL ---
+// --- COMPONENTE PRINCIPAL DASHBOARD ---
 const Dashboard = ({ data, kpis }) => {
   const [vehicleSettings, setVehicleSettings] = useState({});
   const [stationSettings, setStationSettings] = useState({});
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isVehiclesModalOpen, setIsVehiclesModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   
+  // Estado para el ordenamiento de la tabla pequeña (Preview)
+  const [previewSortConfig, setPreviewSortConfig] = useState({ key: 'fecha', direction: 'desc' });
+
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -147,12 +233,11 @@ const Dashboard = ({ data, kpis }) => {
     return formatCompact(avg, true);
   }, [chartData, hasRealData]);
 
-  // Procesar Lista de Vehículos (Agregando Costos)
+  // Lista de Vehículos
   const fullVehicleList = useMemo(() => {
     if (!hasRealData) return [];
-
-    // Agregamos cálculo de costo por vehículo aquí mismo (re-iterando data o filtrando kpis si trajéramos costo por unidad en kpis)
-    // Como kpis.topConsumers solo trae litros, vamos a calcular costos aquí rápido:
+    
+    // Calculamos costos por unidad
     const costsByUnit = {};
     data.forEach(row => {
         if (!costsByUnit[row.unidad]) costsByUnit[row.unidad] = 0;
@@ -179,7 +264,7 @@ const Dashboard = ({ data, kpis }) => {
         id: c.unidad,
         detalle: marcaModelo || `Unidad #${c.unidad}`,
         litros: c.litros,
-        costo: costsByUnit[c.unidad] || 0, // Nuevo campo costo
+        costo: costsByUnit[c.unidad] || 0,
         percent: (c.litros / maxLitros) * 100,
         conductores: driverString,
         centroCosto: config.centroCosto || 'Sin Asignar',
@@ -191,7 +276,7 @@ const Dashboard = ({ data, kpis }) => {
   const topVehicles = fullVehicleList.slice(0, 5);
   const maxLitrosForModal = fullVehicleList.length > 0 ? fullVehicleList[0].litros : 1;
 
-  // Centro de costos (Donut)
+  // Centro de costos
   const costCenterData = useMemo(() => {
     if (!hasRealData) return { byCenter: [], byLocation: [] };
     const centerMap = {};
@@ -219,7 +304,6 @@ const Dashboard = ({ data, kpis }) => {
   }, [data, vehicleSettings, hasRealData]);
 
   const COLORS = ['#367C2B', '#F59E0B', '#3B82F6', '#EF4444', '#131614', '#9CA3AF'];
-  const tableData = hasRealData ? data.slice(0, 8) : [];
 
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
     const RADIAN = Math.PI / 180;
@@ -230,8 +314,27 @@ const Dashboard = ({ data, kpis }) => {
     return <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={11} fontWeight="bold">{`${(percent * 100).toFixed(1)}%`}</text>;
   };
 
+  // --- LÓGICA DE ORDENAMIENTO TABLA PREVIEW ---
+  const handlePreviewSort = (key) => {
+    setPreviewSortConfig(current => ({
+      key,
+      direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  const previewTableData = useMemo(() => {
+    if (!hasRealData) return [];
+    // Ordenar toda la data
+    const sorted = sortData(data, previewSortConfig);
+    // Mostrar solo los primeros 8 del orden actual
+    return sorted.slice(0, 8);
+  }, [data, hasRealData, previewSortConfig]);
+
+
   return (
     <div className="p-8 space-y-6 max-w-[1600px] mx-auto">
+      
+      {/* KPIS */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         <KPICard title="Litros Totales" value={`${displayTotal} L`} subtext="Histórico acumulado" icon={Fuel} trend="up" trendValue="Activo" iconColor="text-jd-green" />
         <KPICard title="Gasto Estimado (M.N.)" value={displayCost} subtext="Total acumulado" icon={Gauge} trend="neutral" trendValue="Estable" iconColor="text-blue-600" />
@@ -239,6 +342,7 @@ const Dashboard = ({ data, kpis }) => {
         <KPICard title="Unidades Reportadas" value={hasRealData ? kpis.topConsumers.length : "0"} subtext="Vehículos únicos" icon={Tractor} trend="up" trendValue="Flota" iconColor="text-orange-600" />
       </div>
 
+      {/* GRILLA PRINCIPAL */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex justify-between items-center mb-6">
@@ -260,7 +364,7 @@ const Dashboard = ({ data, kpis }) => {
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col h-[450px]">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold text-gray-800">Mayor Consumo</h3>
-            <button onClick={() => setIsModalOpen(true)} className="text-jd-green text-xs font-bold uppercase hover:underline flex items-center gap-1">Ver Tabla Completa <ArrowRight size={14}/></button>
+            <button onClick={() => setIsVehiclesModalOpen(true)} className="text-jd-green text-xs font-bold uppercase hover:underline flex items-center gap-1">Ver Tabla Completa <ArrowRight size={14}/></button>
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
             {topVehicles.length === 0 ? <p className="text-gray-400 text-sm text-center py-4">Sin datos.</p> : topVehicles.map((item, idx) => (
@@ -291,6 +395,7 @@ const Dashboard = ({ data, kpis }) => {
         </div>
       </div>
 
+      {/* GRÁFICOS CIRCULARES */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
           <h3 className="text-lg font-bold text-gray-800 mb-2 flex items-center gap-2"><Building2 className="text-jd-green" size={20}/> Consumo por Centro de Costo</h3>
@@ -333,6 +438,7 @@ const Dashboard = ({ data, kpis }) => {
         </div>
       </div>
 
+      {/* MAPA DE FLOTA */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-[500px] flex flex-col">
         <div className="mb-4">
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><MapPin className="text-jd-green" /> Mapa de Consumo</h3>
@@ -343,20 +449,28 @@ const Dashboard = ({ data, kpis }) => {
         </div>
       </div>
 
+      {/* HISTORIAL RECIENTE CON ORDENAMIENTO */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-200"><h3 className="text-lg font-bold text-gray-800">Cargas Recientes</h3></div>
         <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
                 <thead className="bg-gray-50 text-gray-400 text-xs uppercase font-semibold">
-                    <tr><th className="p-4 pl-6">Fecha</th><th className="p-4">Unidad</th><th className="p-4">Conductor</th><th className="p-4">Estación</th><th className="p-4 text-right">Litros</th><th className="p-4 text-right pr-6">Costo (M.N.)</th></tr>
+                    <tr>
+                        <SortableHeader label="Fecha" sortKey="fecha" currentConfig={previewSortConfig} onSort={handlePreviewSort} />
+                        <SortableHeader label="Unidad" sortKey="unidad" currentConfig={previewSortConfig} onSort={handlePreviewSort} />
+                        <SortableHeader label="Conductor" sortKey="conductor" currentConfig={previewSortConfig} onSort={handlePreviewSort} />
+                        <SortableHeader label="Estación" sortKey="estacion" currentConfig={previewSortConfig} onSort={handlePreviewSort} />
+                        <SortableHeader label="Litros" sortKey="litros" currentConfig={previewSortConfig} onSort={handlePreviewSort} align="right" />
+                        <SortableHeader label="Costo (M.N.)" sortKey="costo" currentConfig={previewSortConfig} onSort={handlePreviewSort} align="right" />
+                    </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                    {tableData.map((row, idx) => (
-                        <tr key={row.id || idx} className="hover:bg-green-50/30 transition-colors">
+                    {previewTableData.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-green-50/30 transition-colors">
                             <td className="p-4 pl-6 text-gray-500 font-medium whitespace-nowrap">{row.fecha}</td>
                             <td className="p-4 font-bold text-gray-800">{row.unidad}</td>
                             <td className="p-4 text-gray-600 text-xs">{row.conductor}</td>
-                            <td className="p-4 text-gray-500 text-xs md:text-sm truncate max-w-[150px]">{row.estacion}</td>
+                            <td className="p-4 text-gray-500 text-xs md:text-sm truncate max-w-[150px]" title={row.direccion || ''}>{row.estacion}</td>
                             <td className="p-4 text-right font-mono font-bold text-gray-700">{row.litros.toLocaleString('es-AR')} L</td>
                             <td className="p-4 text-right text-gray-500 font-mono pr-6">${row.costo.toLocaleString('es-AR')}</td>
                         </tr>
@@ -364,9 +478,20 @@ const Dashboard = ({ data, kpis }) => {
                 </tbody>
             </table>
         </div>
+        {/* BOTÓN VER HISTORIAL COMPLETO */}
+        <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-center">
+             <button 
+               onClick={() => setIsHistoryModalOpen(true)}
+               className="text-sm font-bold text-jd-green flex items-center gap-1 hover:underline"
+             >
+                Ver Historial Completo <ArrowRight size={16} />
+             </button>
+        </div>
       </div>
 
-      <AllVehiclesModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} vehicles={fullVehicleList} maxLitros={maxLitrosForModal} />
+      {/* MODALES */}
+      <AllVehiclesModal isOpen={isVehiclesModalOpen} onClose={() => setIsVehiclesModalOpen(false)} vehicles={fullVehicleList} maxLitros={maxLitrosForModal} />
+      <FullHistoryModal isOpen={isHistoryModalOpen} onClose={() => setIsHistoryModalOpen(false)} data={data} />
     </div>
   );
 };
