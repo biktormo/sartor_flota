@@ -1,24 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, 
-  ScatterChart, Scatter, YAxis, CartesianGrid, ZAxis 
-} from 'recharts';
-import { 
-  Save, Filter, MapPin, Building2, Car, TrendingUp, AlertCircle, Loader2, Gauge, AlertTriangle, CheckCircle, Info
-} from 'lucide-react';
+import { Save, Building2, Loader2, AlertCircle, Gauge, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import { fetchVehicleSettings, saveVehicleSettings } from '../utils/firebaseService';
 
-// Opciones
 const CENTROS_COSTO = ['SERVICIO', 'REPUESTOS', 'VENTAS', 'CSC', 'ADMINISTRACION'];
 const LOCALIDADES = ['CHARATA', 'BANDERA', 'QUIMILI'];
 
 const VehiclesPage = ({ data }) => {
-  const [activeTab, setActiveTab] = useState('efficiency'); // Arrancamos en eficiencia para ver lo nuevo
+  const [activeTab, setActiveTab] = useState('efficiency');
   const [settings, setSettings] = useState({});
   const [isSaving, setIsSaving] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
 
-  // Cargar configuraciones
   useEffect(() => {
     const loadSettings = async () => {
       const savedSettings = await fetchVehicleSettings();
@@ -30,7 +22,7 @@ const VehiclesPage = ({ data }) => {
 
   // --- LÓGICA DE DATOS ---
   
-  // 1. Lista única para gestión (Tab 1)
+  // 1. Lista única para gestión
   const uniqueVehicles = useMemo(() => {
     if (!data || data.length === 0) return [];
     const map = new Map();
@@ -48,13 +40,12 @@ const VehiclesPage = ({ data }) => {
     return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
   }, [data]);
 
-  // 2. Datos procesados para eficiencia (Tab 2)
+  // 2. Datos procesados para eficiencia (AUTOMÁTICO DESDE CSV)
   const efficiencyData = useMemo(() => {
     if (!data || data.length === 0) return [];
 
     const vehiclesMap = {};
 
-    // Agrupar consumos
     data.forEach(row => {
       if (!row.unidad || row.unidad.toString().toUpperCase().includes('SARTOR')) return;
       
@@ -63,38 +54,34 @@ const VehiclesPage = ({ data }) => {
           id: row.unidad,
           litros: 0,
           costo: 0,
+          distanciaAcumulada: 0, // Nueva variable acumuladora
           csvMarca: row.marca,
           csvModelo: row.modelo
         };
       }
       vehiclesMap[row.unidad].litros += row.litros;
       vehiclesMap[row.unidad].costo += row.costo;
+      // Sumamos las distancias calculadas fila por fila en dataProcessor
+      vehiclesMap[row.unidad].distanciaAcumulada += (row.distancia || 0);
     });
 
     return Object.values(vehiclesMap).map(v => {
       const config = settings[v.id] || {};
-      
-      // Datos combinados
       const marca = config.marca || v.csvMarca || '';
       const modelo = config.modelo || v.csvModelo || '';
-      const distancia = parseFloat(config.distanciaRecorrida) || 0; // Dato manual guardado en Firebase
       
       // Cálculo de Rendimiento
-      // Evitar división por cero
-      const rendimiento = v.litros > 0 ? (distancia / v.litros) : 0;
+      const rendimiento = v.litros > 0 ? (v.distanciaAcumulada / v.litros) : 0;
 
       return {
         ...v,
         marca,
         modelo,
-        distancia,
         rendimiento
       };
-    }).sort((a, b) => b.litros - a.litros); // Ordenar por consumo
+    }).sort((a, b) => b.litros - a.litros);
   }, [data, settings]);
 
-
-  // --- MANEJADORES ---
 
   const handleSettingChange = (vehicleId, field, value) => {
     setSettings(prev => ({
@@ -114,7 +101,7 @@ const VehiclesPage = ({ data }) => {
         ...settings[key]
       }));
       await saveVehicleSettings(settingsArray);
-      alert('Datos guardados exitosamente (Centros de Costo, Marcas y Distancias).');
+      alert('Datos administrativos guardados correctamente.');
     } catch (error) {
       alert('Error al guardar.');
     } finally {
@@ -122,7 +109,7 @@ const VehiclesPage = ({ data }) => {
     }
   };
 
-  // --- SUB-COMPONENTES ---
+  // --- TABS ---
 
   const ManagementTab = () => (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden animate-in fade-in">
@@ -195,12 +182,9 @@ const VehiclesPage = ({ data }) => {
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
             <Gauge className="text-jd-green" /> Análisis de Rendimiento
           </h3>
-          <p className="text-sm text-gray-500">Ingresa la distancia recorrida en el periodo para calcular el rendimiento.</p>
+          <p className="text-sm text-gray-500">Cálculo automático basado en odómetros reportados en el CSV.</p>
         </div>
-        <button onClick={handleSave} disabled={isSaving} className="bg-jd-green hover:bg-green-800 text-white px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-sm disabled:opacity-50">
-          {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-          {isSaving ? 'Guardar Odómetros' : 'Guardar Odómetros'}
-        </button>
+        {/* Ya no hay botón de guardar porque es automático */}
       </div>
 
       <div className="overflow-x-auto">
@@ -210,7 +194,7 @@ const VehiclesPage = ({ data }) => {
               <th className="p-4 pl-6">Unidad / Detalle</th>
               <th className="p-4 text-right">Consumo (L)</th>
               <th className="p-4 text-right">Costo ($)</th>
-              <th className="p-4 w-48 text-right bg-blue-50/50">Recorrido (Km/Hs)</th>
+              <th className="p-4 text-right">Recorrido (Km)</th>
               <th className="p-4 text-center">Rendimiento</th>
               <th className="p-4 pr-6 text-center">Observación</th>
             </tr>
@@ -223,22 +207,26 @@ const VehiclesPage = ({ data }) => {
               let statusText = 'Sin Datos';
               let bgRow = '';
 
-              if (item.distancia > 0 && item.litros > 0) {
+              // Si tiene litros pero no distancia, algo falta en el CSV
+              if (item.litros > 0 && item.distanciaAcumulada === 0) {
+                  statusText = 'Falta Odómetro';
+                  statusIcon = <AlertCircle size={16} />;
+              }
+              else if (item.distanciaAcumulada > 0 && item.litros > 0) {
                 const kpl = item.rendimiento;
                 
-                if (kpl > 16) {
-                  // Rendimiento sospechosamente alto = Posible carga fuera de sistema
+                if (kpl > 20) {
+                  // Sospechosamente alto -> Posible carga externa
                   statusColor = 'text-red-600';
                   statusIcon = <AlertTriangle size={16} className="text-red-500" />;
-                  statusText = 'Revisar (Alto)';
+                  statusText = 'Revisar (Muy Alto)';
                   bgRow = 'bg-red-50/30';
                 } else if (kpl < 4) {
-                  // Rendimiento muy bajo = Alto consumo o Maquinaria Pesada
+                  // Consumo alto
                   statusColor = 'text-orange-600';
                   statusIcon = <AlertCircle size={16} className="text-orange-500" />;
                   statusText = 'Consumo Alto';
                 } else {
-                  // Rango normal (ej: 4 a 16 km/l para pickups)
                   statusColor = 'text-green-600';
                   statusIcon = <CheckCircle size={16} className="text-green-500" />;
                   statusText = 'Normal';
@@ -258,22 +246,13 @@ const VehiclesPage = ({ data }) => {
                     ${item.costo.toLocaleString('es-AR')}
                   </td>
                   
-                  {/* CAMPO EDITABLE DE DISTANCIA */}
-                  <td className="p-4 bg-blue-50/30">
-                    <div className="flex items-center justify-end gap-2">
-                      <input 
-                        type="number" 
-                        placeholder="0"
-                        value={settings[item.id]?.distanciaRecorrida || ''}
-                        onChange={(e) => handleSettingChange(item.id, 'distanciaRecorrida', e.target.value)}
-                        className="w-24 text-right border-gray-300 rounded-md text-sm focus:ring-jd-green focus:border-jd-green bg-white shadow-sm p-1"
-                      />
-                      <span className="text-xs text-gray-400">km</span>
-                    </div>
+                  {/* DISTANCIA CALCULADA AUTOMÁTICA */}
+                  <td className="p-4 text-right font-mono text-blue-600">
+                    {item.distanciaAcumulada.toLocaleString('es-AR')} km
                   </td>
 
                   <td className="p-4 text-center">
-                    {item.distancia > 0 ? (
+                    {item.distanciaAcumulada > 0 ? (
                       <span className={`font-bold text-base ${statusColor}`}>
                         {item.rendimiento.toFixed(2)} <span className="text-xs font-normal text-gray-400">km/L</span>
                       </span>
@@ -306,8 +285,8 @@ const VehiclesPage = ({ data }) => {
       <div className="bg-yellow-50 border-t border-yellow-100 p-4 text-xs text-yellow-800 flex gap-2">
         <AlertTriangle size={16} />
         <div>
-          <p><strong>Nota sobre el cálculo:</strong> Rendimiento = Distancia Ingresada / Litros Cargados en Sistema.</p>
-          <p>Si el rendimiento es anormalmente alto ({'>'}16 km/L), es probable que el vehículo haya cargado combustible fuera del sistema (en otras estaciones no registradas).</p>
+          <p><strong>Cálculo:</strong> Se suman las diferencias de odómetro (Último - Anterior) de cada carga en el CSV.</p>
+          <p>Si el rendimiento es anormalmente alto ({'>'}20 km/L), verifica si hay cargas de combustible realizadas fuera del sistema.</p>
         </div>
       </div>
     </div>

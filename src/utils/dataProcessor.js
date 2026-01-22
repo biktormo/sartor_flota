@@ -5,6 +5,7 @@ import Papa from 'papaparse';
 const cleanNumber = (val) => {
   if (!val) return 0;
   let str = val.toString();
+  // Formato AR/ES: 1.250,50 -> JS: 1250.50
   if (str.includes(',') && str.includes('.')) {
     str = str.replace(/\./g, '').replace(',', '.');
   } else if (str.includes(',')) {
@@ -44,6 +45,22 @@ export const parseCSV = (file) => {
           .map((row, index) => {
             const costoRaw = findValue(row, ['M.N.', 'M.N', 'IMPORTE', 'NETO', 'COSTO']) || '0';
             const litrosRaw = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']) || '0';
+            
+            // --- NUEVO: ODOMETROS ---
+            const odoAntRaw = findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR', 'KILOMETRAJE ANTERIOR']) || '0';
+            const odoUltRaw = findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO', 'KILOMETRAJE ACTUAL']) || '0';
+            
+            const odoAnt = cleanNumber(odoAntRaw);
+            const odoUlt = cleanNumber(odoUltRaw);
+            
+            // Calculamos distancia de este viaje específico
+            // Validamos que sea mayor a 0 para evitar errores de tipeo en el CSV (ej: vueltas de reloj o errores de carga manual)
+            let distanciaViaje = 0;
+            if (odoUlt > odoAnt) {
+                distanciaViaje = odoUlt - odoAnt;
+            }
+            // ------------------------
+
             const unidadRaw = findValue(row, ['UNIDAD', 'MOVIL', 'VEHICULO']) || 'Desconocido';
             const placaRaw = findValue(row, ['PLACA', 'PATENTE', 'DOMINIO']) || '';
             const marcaRaw = findValue(row, ['MARCA']) || '';
@@ -65,7 +82,9 @@ export const parseCSV = (file) => {
               costo: cleanNumber(costoRaw),
               estacion: estacionRaw,
               direccion: direccionRaw,
-              ciudad: ciudadRaw
+              ciudad: ciudadRaw,
+              // Guardamos la distancia calculada
+              distancia: distanciaViaje 
             };
           });
         resolve(processedData);
@@ -108,7 +127,6 @@ export const calculateKPIs = (data) => {
   return { totalLitros, totalCosto, topConsumers };
 };
 
-// --- MODIFICADO AQUÍ PARA INCLUIR COSTOS ---
 export const processMonthlyData = (data) => {
   if (!data || data.length === 0) return [];
 
@@ -139,11 +157,11 @@ export const processMonthlyData = (data) => {
           fullName: `${mesesCompletos[monthIndex]} ${year}`,
           year: year,
           litros: 0,
-          costo: 0 // Iniciamos contador de costo
+          costo: 0
         };
       }
       groupedData[key].litros += row.litros;
-      groupedData[key].costo += row.costo; // Sumamos costo
+      groupedData[key].costo += row.costo;
     }
   });
 
@@ -153,7 +171,7 @@ export const processMonthlyData = (data) => {
       name: item.name, 
       fullName: item.fullName, 
       litros: Math.round(item.litros),
-      costo: Math.round(item.costo) // Pasamos el costo redondeado
+      costo: Math.round(item.costo)
     }))
     .slice(-12);
 };
