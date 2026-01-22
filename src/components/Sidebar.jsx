@@ -20,10 +20,6 @@ const Sidebar = () => {
           alt="SARTOR Logo" 
           className="h-10 w-auto object-contain" // Ajusta h-8, h-10 o h-12 según el tamaño que prefieras
         />
-          <Truck size={20} />
-        </div>
-        <div>
-          <p className="text-[10px] text-gray-400 font-medium tracking-wide">Gestión de Flota</p>
         </div>
       </div>
 
