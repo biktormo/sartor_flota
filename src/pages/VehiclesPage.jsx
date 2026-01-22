@@ -40,7 +40,7 @@ const VehiclesPage = ({ data }) => {
     return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
   }, [data]);
 
-  // 2. Datos procesados para eficiencia (AUTOMÁTICO DESDE CSV)
+  // 2. Datos procesados para eficiencia (LÓGICA CORREGIDA: MIN vs MAX)
   const efficiencyData = useMemo(() => {
     if (!data || data.length === 0) return [];
 
@@ -54,15 +54,25 @@ const VehiclesPage = ({ data }) => {
           id: row.unidad,
           litros: 0,
           costo: 0,
-          distanciaAcumulada: 0, // Nueva variable acumuladora
           csvMarca: row.marca,
-          csvModelo: row.modelo
+          csvModelo: row.modelo,
+          minOdo: Infinity, // Iniciamos en infinito para encontrar el menor
+          maxOdo: 0         // Iniciamos en 0 para encontrar el mayor
         };
       }
-      vehiclesMap[row.unidad].litros += row.litros;
-      vehiclesMap[row.unidad].costo += row.costo;
-      // Sumamos las distancias calculadas fila por fila en dataProcessor
-      vehiclesMap[row.unidad].distanciaAcumulada += (row.distancia || 0);
+      
+      const v = vehiclesMap[row.unidad];
+      v.litros += row.litros;
+      v.costo += row.costo;
+
+      // Buscamos el menor odómetro registrado (ignorando 0 si es error)
+      if (row.odoAnt > 0 && row.odoAnt < v.minOdo) {
+        v.minOdo = row.odoAnt;
+      }
+      // Buscamos el mayor odómetro registrado
+      if (row.odoUlt > v.maxOdo) {
+        v.maxOdo = row.odoUlt;
+      }
     });
 
     return Object.values(vehiclesMap).map(v => {
@@ -70,13 +80,20 @@ const VehiclesPage = ({ data }) => {
       const marca = config.marca || v.csvMarca || '';
       const modelo = config.modelo || v.csvModelo || '';
       
+      // Cálculo de Distancia Real: Máximo - Mínimo
+      let distanciaCalculada = 0;
+      if (v.maxOdo > v.minOdo && v.minOdo !== Infinity) {
+        distanciaCalculada = v.maxOdo - v.minOdo;
+      }
+
       // Cálculo de Rendimiento
-      const rendimiento = v.litros > 0 ? (v.distanciaAcumulada / v.litros) : 0;
+      const rendimiento = v.litros > 0 ? (distanciaCalculada / v.litros) : 0;
 
       return {
         ...v,
         marca,
         modelo,
+        distanciaCalculada,
         rendimiento
       };
     }).sort((a, b) => b.litros - a.litros);
@@ -182,9 +199,8 @@ const VehiclesPage = ({ data }) => {
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
             <Gauge className="text-jd-green" /> Análisis de Rendimiento
           </h3>
-          <p className="text-sm text-gray-500">Cálculo automático basado en odómetros reportados en el CSV.</p>
+          <p className="text-sm text-gray-500">Cálculo: (Último Odómetro - Primer Odómetro) / Consumo Total.</p>
         </div>
-        {/* Ya no hay botón de guardar porque es automático */}
       </div>
 
       <div className="overflow-x-auto">
@@ -201,28 +217,25 @@ const VehiclesPage = ({ data }) => {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {efficiencyData.map((item) => {
-              // Lógica de Semáforo
+              // Lógica de Semáforo (Rendimiento Km/L)
               let statusColor = 'text-gray-500';
               let statusIcon = <Info size={16} />;
               let statusText = 'Sin Datos';
               let bgRow = '';
 
-              // Si tiene litros pero no distancia, algo falta en el CSV
-              if (item.litros > 0 && item.distanciaAcumulada === 0) {
-                  statusText = 'Falta Odómetro';
+              if (item.litros > 0 && item.distanciaCalculada === 0) {
+                  statusText = 'Datos Odómetro?';
                   statusIcon = <AlertCircle size={16} />;
               }
-              else if (item.distanciaAcumulada > 0 && item.litros > 0) {
+              else if (item.distanciaCalculada > 0 && item.litros > 0) {
                 const kpl = item.rendimiento;
                 
-                if (kpl > 20) {
-                  // Sospechosamente alto -> Posible carga externa
+                if (kpl > 18) {
                   statusColor = 'text-red-600';
                   statusIcon = <AlertTriangle size={16} className="text-red-500" />;
-                  statusText = 'Revisar (Muy Alto)';
+                  statusText = 'Error / Ext.';
                   bgRow = 'bg-red-50/30';
                 } else if (kpl < 4) {
-                  // Consumo alto
                   statusColor = 'text-orange-600';
                   statusIcon = <AlertCircle size={16} className="text-orange-500" />;
                   statusText = 'Consumo Alto';
@@ -246,13 +259,13 @@ const VehiclesPage = ({ data }) => {
                     ${item.costo.toLocaleString('es-AR')}
                   </td>
                   
-                  {/* DISTANCIA CALCULADA AUTOMÁTICA */}
+                  {/* DISTANCIA CALCULADA */}
                   <td className="p-4 text-right font-mono text-blue-600">
-                    {item.distanciaAcumulada.toLocaleString('es-AR')} km
+                    {item.distanciaCalculada.toLocaleString('es-AR')} km
                   </td>
 
                   <td className="p-4 text-center">
-                    {item.distanciaAcumulada > 0 ? (
+                    {item.distanciaCalculada > 0 ? (
                       <span className={`font-bold text-base ${statusColor}`}>
                         {item.rendimiento.toFixed(2)} <span className="text-xs font-normal text-gray-400">km/L</span>
                       </span>
@@ -264,7 +277,7 @@ const VehiclesPage = ({ data }) => {
                   <td className="p-4 pr-6">
                     <div className={`flex items-center justify-center gap-1.5 text-xs font-bold border px-2 py-1 rounded-full w-fit mx-auto ${
                       statusText === 'Normal' ? 'bg-green-50 border-green-200 text-green-700' :
-                      statusText.includes('Revisar') ? 'bg-red-50 border-red-200 text-red-700' :
+                      statusText.includes('Error') ? 'bg-red-50 border-red-200 text-red-700' :
                       statusText.includes('Alto') ? 'bg-orange-50 border-orange-200 text-orange-700' :
                       'bg-gray-100 border-gray-200 text-gray-500'
                     }`}>
@@ -282,11 +295,11 @@ const VehiclesPage = ({ data }) => {
         </table>
       </div>
       
-      <div className="bg-yellow-50 border-t border-yellow-100 p-4 text-xs text-yellow-800 flex gap-2">
-        <AlertTriangle size={16} />
+      <div className="bg-blue-50 border-t border-blue-100 p-4 text-xs text-blue-800 flex gap-2">
+        <Info size={16} />
         <div>
-          <p><strong>Cálculo:</strong> Se suman las diferencias de odómetro (Último - Anterior) de cada carga en el CSV.</p>
-          <p>Si el rendimiento es anormalmente alto ({'>'}20 km/L), verifica si hay cargas de combustible realizadas fuera del sistema.</p>
+          <p><strong>Fórmula:</strong> (Odómetro Máximo del Periodo - Odómetro Mínimo del Periodo) / Litros Totales Cargados.</p>
+          <p>Esto proporciona un promedio de eficiencia. Si el resultado es excesivo ({'>'}18 km/L), puede indicar cargas no registradas en el sistema.</p>
         </div>
       </div>
     </div>

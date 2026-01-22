@@ -5,7 +5,6 @@ import Papa from 'papaparse';
 const cleanNumber = (val) => {
   if (!val) return 0;
   let str = val.toString();
-  // Formato AR/ES: 1.250,50 -> JS: 1250.50
   if (str.includes(',') && str.includes('.')) {
     str = str.replace(/\./g, '').replace(',', '.');
   } else if (str.includes(',')) {
@@ -46,20 +45,13 @@ export const parseCSV = (file) => {
             const costoRaw = findValue(row, ['M.N.', 'M.N', 'IMPORTE', 'NETO', 'COSTO']) || '0';
             const litrosRaw = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']) || '0';
             
-            // --- NUEVO: ODOMETROS ---
+            // --- LECTURA DE ODÓMETROS ---
             const odoAntRaw = findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR', 'KILOMETRAJE ANTERIOR']) || '0';
             const odoUltRaw = findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO', 'KILOMETRAJE ACTUAL']) || '0';
             
             const odoAnt = cleanNumber(odoAntRaw);
             const odoUlt = cleanNumber(odoUltRaw);
-            
-            // Calculamos distancia de este viaje específico
-            // Validamos que sea mayor a 0 para evitar errores de tipeo en el CSV (ej: vueltas de reloj o errores de carga manual)
-            let distanciaViaje = 0;
-            if (odoUlt > odoAnt) {
-                distanciaViaje = odoUlt - odoAnt;
-            }
-            // ------------------------
+            // ----------------------------
 
             const unidadRaw = findValue(row, ['UNIDAD', 'MOVIL', 'VEHICULO']) || 'Desconocido';
             const placaRaw = findValue(row, ['PLACA', 'PATENTE', 'DOMINIO']) || '';
@@ -83,8 +75,9 @@ export const parseCSV = (file) => {
               estacion: estacionRaw,
               direccion: direccionRaw,
               ciudad: ciudadRaw,
-              // Guardamos la distancia calculada
-              distancia: distanciaViaje 
+              // Guardamos valores crudos para el cálculo de min/max
+              odoAnt: odoAnt,
+              odoUlt: odoUlt
             };
           });
         resolve(processedData);
