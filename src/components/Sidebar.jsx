@@ -13,16 +13,17 @@ const Sidebar = () => {
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen fixed left-0 top-0 z-10">
-      <div className="h-16 flex items-center px-6 border-b border-gray-200">
-        <div className="bg-jd-green text-white p-1.5 rounded-md">
+      
+      {/* --- ZONA DE LOGO --- */}
+      <div className="h-16 flex items-center justify-center px-6 border-b border-gray-200 bg-white">
         <img 
           src="/logo.png" 
           alt="SARTOR Logo" 
-          className="h-10 w-auto object-contain" // Ajusta h-8, h-10 o h-12 según el tamaño que prefieras
+          className="h-10 w-auto object-contain" // Ajusta la altura si es necesario
         />
-        </div>
       </div>
 
+      {/* --- MENÚ DE NAVEGACIÓN --- */}
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         <NavLink to="/" className={linkClass}>
           <LayoutDashboard size={18} /> Panel General
@@ -58,16 +59,17 @@ const Sidebar = () => {
         </NavLink>
       </nav>
 
+      {/* --- PERFIL DE USUARIO --- */}
       <div className="p-4 border-t border-gray-100">
         <div className="flex items-center gap-3">
           <img 
-            src="https://res.cloudinary.com/dph379kxx/image/upload/v1757331830/SARTOR_Victor_Manuel_Ojeda_-_Gerente_de_Proyectos_vaxd6k.png" 
+            src="https://i.pravatar.cc/150?img=11" 
             alt="Usuario" 
             className="w-9 h-9 rounded-full object-cover border border-gray-200"
           />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-gray-800 truncate">Victor Ojeda</p>
-            <p className="text-xs text-gray-400 truncate">Gerente de Proyectos</p>
+            <p className="text-sm font-bold text-gray-800 truncate">Juan Pérez</p>
+            <p className="text-xs text-gray-400 truncate">Jefe de Taller</p>
           </div>
           <button className="text-gray-400 hover:text-gray-600" title="Cerrar Sesión">
             <LogOut size={18} />
