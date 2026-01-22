@@ -23,7 +23,6 @@ const Sidebar = () => {
           <Truck size={20} />
         </div>
         <div>
-          <h1 className="font-bold text-gray-800 leading-none">SARTOR</h1>
           <p className="text-[10px] text-gray-400 font-medium tracking-wide">Gestión de Flota</p>
         </div>
       </div>
