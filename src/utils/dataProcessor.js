@@ -2,14 +2,23 @@ import Papa from 'papaparse';
 
 // --- HELPERS ---
 
+// 1. Limpiador de números FORMATO ARGENTINA (1.000,00)
 const cleanNumber = (val) => {
   if (!val) return 0;
-  let str = val.toString();
-  if (str.includes(',') && str.includes('.')) {
-    str = str.replace(/\./g, '').replace(',', '.');
-  } else if (str.includes(',')) {
-    str = str.replace(',', '.');
-  }
+  let str = val.toString().trim();
+  
+  // Si está vacío o es guión
+  if (str === '' || str === '-') return 0;
+
+  // Paso 1: Eliminar todos los puntos (separadores de miles)
+  // Ej: "44.851" -> "44851"
+  // Ej: "1.250,50" -> "1250,50"
+  str = str.replace(/\./g, '');
+
+  // Paso 2: Reemplazar la coma por punto (para que JS lo entienda como decimal)
+  // Ej: "1250,50" -> "1250.50"
+  str = str.replace(',', '.');
+
   const number = parseFloat(str);
   return isNaN(number) ? 0 : number;
 };
@@ -45,28 +54,33 @@ export const parseCSV = (file) => {
             const costoRaw = findValue(row, ['M.N.', 'M.N', 'IMPORTE', 'NETO', 'COSTO']) || '0';
             const litrosRaw = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']) || '0';
             
-            // --- LECTURA DE ODÓMETROS ---
-            const odoAntRaw = findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR', 'KILOMETRAJE ANTERIOR']) || '0';
-            const odoUltRaw = findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO', 'KILOMETRAJE ACTUAL']) || '0';
+            // Odómetros
+            const odoAntRaw = findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR']) || '0';
+            const odoUltRaw = findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO']) || '0';
             
+            // Usamos la nueva función cleanNumber
             const odoAnt = cleanNumber(odoAntRaw);
             const odoUlt = cleanNumber(odoUltRaw);
-            // ----------------------------
+            
+            // Distancia del viaje (dato interno de la fila)
+            let distancia = 0;
+            if (odoUlt > odoAnt) {
+                distancia = odoUlt - odoAnt;
+            }
 
             const unidadRaw = findValue(row, ['UNIDAD', 'MOVIL', 'VEHICULO']) || 'Desconocido';
-            const placaRaw = findValue(row, ['PLACA', 'PATENTE', 'DOMINIO']) || '';
-            const marcaRaw = findValue(row, ['MARCA']) || '';
-            const modeloRaw = findValue(row, ['MODELO']) || '';
             const conductorRaw = findValue(row, ['CONDUCTOR', 'CHOFER']) || 'Sin Asignar';
             const estacionRaw = findValue(row, ['ESTACION DE SERVICIO', 'ESTACION', 'LUGAR', 'DIRECCION ESTACION']) || 'Externo';
-            const direccionRaw = findValue(row, ['DIRECCIÓN ESTACIÓN', 'DIRECCION', 'DOMICILIO', 'CALLE']) || '';
-            const ciudadRaw = findValue(row, ['CIUDAD', 'LOCALIDAD', 'POBLACION']) || '';
+            const direccionRaw = findValue(row, ['DIRECCIÓN ESTACIÓN', 'DIRECCION']) || '';
+            const ciudadRaw = findValue(row, ['CIUDAD', 'LOCALIDAD']) || '';
+            const marcaRaw = findValue(row, ['MARCA']) || '';
+            const modeloRaw = findValue(row, ['MODELO']) || '';
 
             return {
               id: index,
               fecha: findValue(row, ['FECHA', 'DATE']) || '',
               unidad: unidadRaw,
-              placa: placaRaw,
+              placa: findValue(row, ['PLACA', 'PATENTE']) || '',
               marca: marcaRaw,
               modelo: modeloRaw,
               conductor: conductorRaw,
@@ -75,9 +89,9 @@ export const parseCSV = (file) => {
               estacion: estacionRaw,
               direccion: direccionRaw,
               ciudad: ciudadRaw,
-              // Guardamos valores crudos para el cálculo de min/max
-              odoAnt: odoAnt,
-              odoUlt: odoUlt
+              odoAnt, // Valor numérico limpio
+              odoUlt, // Valor numérico limpio
+              distancia // Valor numérico limpio
             };
           });
         resolve(processedData);
@@ -88,9 +102,7 @@ export const parseCSV = (file) => {
 };
 
 export const calculateKPIs = (data) => {
-  if (!data || data.length === 0) {
-    return { totalLitros: 0, totalCosto: 0, topConsumers: [] };
-  }
+  if (!data || data.length === 0) return { totalLitros: 0, totalCosto: 0, topConsumers: [] };
 
   const totalLitros = data.reduce((acc, curr) => acc + (curr.litros || 0), 0);
   const totalCosto = data.reduce((acc, curr) => acc + (curr.costo || 0), 0);
@@ -122,7 +134,7 @@ export const calculateKPIs = (data) => {
 
 export const processMonthlyData = (data) => {
   if (!data || data.length === 0) return [];
-
+  // (Código de processMonthlyData se mantiene igual que antes)
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const mesesCompletos = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   const groupedData = {};

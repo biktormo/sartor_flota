@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, FileSearch, ArrowRight, CheckCircle, 
-  Tractor, Calendar, MapPin, Search, Fuel, AlertCircle, Gauge
+  Tractor, Calendar, MapPin, Search, Info 
 } from 'lucide-react';
 
 const GapsPage = ({ data }) => {
@@ -10,9 +10,8 @@ const GapsPage = ({ data }) => {
   // 1. Obtener lista de unidades
   const uniqueUnits = useMemo(() => {
     if (!data) return [];
-    // Filtramos para limpiar basura si la hay
     const units = new Set(data.filter(r => r.unidad && r.unidad !== 'Desconocido').map(r => r.unidad));
-    return Array.from(units).sort();
+    return Array.from(units).sort((a, b) => a.toString().localeCompare(b.toString()));
   }, [data]);
 
   // 2. Lógica Core: Análisis de Saltos y Consistencia
@@ -26,11 +25,9 @@ const GapsPage = ({ data }) => {
     const sortedData = unitData.sort((a, b) => {
       const getTime = (dateVal) => {
         if (!dateVal) return 0;
-        // Parseo manual para DD/MM/YYYY HH:mm:ss
         if (typeof dateVal === 'string' && dateVal.includes('/')) {
            const [datePart, timePart] = dateVal.split(' ');
            const [day, month, year] = datePart.split('/');
-           // Si no hay hora, asumimos 00:00:00
            const [hour, min, sec] = timePart ? timePart.split(':') : [0, 0, 0];
            return new Date(year, month - 1, day, hour, min, sec || 0).getTime();
         }
@@ -47,43 +44,51 @@ const GapsPage = ({ data }) => {
       let analysisType = 'OK'; // OK, GAP_CONTINUITY, GAP_DISTANCE
       let message = 'Continuo';
       let prevOdoEnd = 0;
+      let rendimientoCalculado = 0;
       
-      // Cálculo de Distancia del Tramo Actual (Dato interno del CSV)
-      // Evitamos negativos por errores de carga manual
-      const distanciaTramo = current.odoUlt > current.odoAnt ? (current.odoUlt - current.odoAnt) : 0;
-      
-      // Cálculo de Rendimiento del Tramo (Km / Litros cargados al final del tramo)
-      // Nota: Asumimos que se llena el tanque. Si no es tanque lleno, el rendimiento será mentiroso, pero sirve de indicador.
-      const rendimientoTramo = current.litros > 0 ? (distanciaTramo / current.litros) : 0;
+      // La distancia ya viene calculada limpia desde dataProcessor
+      const distanciaTramo = current.distancia;
 
-      // --- VALIDACIÓN 1: CONTINUIDAD (La costura entre registros) ---
+      // --- LOGICA DE RENDIMIENTO (Carga Anterior) ---
+      let litrosAnteriores = 0;
       if (index > 0) {
         const previous = sortedData[index - 1];
         prevOdoEnd = previous.odoUlt;
-        const currentOdoStart = current.odoAnt;
+        litrosAnteriores = previous.litros; // Usamos los litros de la carga anterior
 
-        if (prevOdoEnd > 0 && currentOdoStart > 0) {
-          const diff = Math.abs(currentOdoStart - prevOdoEnd);
-          // Tolerancia 5km
-          if (diff > 5) {
+        // Calcular Rendimiento: Distancia Actual / Litros Anteriores
+        if (litrosAnteriores > 0) {
+            rendimientoCalculado = distanciaTramo / litrosAnteriores;
+        }
+
+        // --- VALIDACIÓN 1: CONTINUIDAD (Salto de "Costura") ---
+        // Si el odómetro final anterior no coincide con el inicial actual
+        if (prevOdoEnd > 0 && current.odoAnt > 0) {
+          const diff = Math.abs(current.odoAnt - prevOdoEnd);
+          if (diff > 5) { // Tolerancia 5km
             analysisType = 'GAP_CONTINUITY';
-            message = `Salto de ${diff.toLocaleString()} km entre cargas`;
+            message = `Salto de ${diff.toLocaleString('es-AR')} km entre cargas`;
             incidentesCount++;
           }
         }
       }
 
-      // --- VALIDACIÓN 2: AUTONOMÍA/DISTANCIA (La consistencia interna) ---
-      // Si la distancia recorrida es absurda para un solo tanque (ej: > 1200km)
-      // O si el rendimiento es absurdo (> 18 km/l para una Hilux/Tractor es imposible)
-      if (analysisType === 'OK') {
-        if (distanciaTramo > 1200) { 
+      // --- VALIDACIÓN 2: AUTONOMÍA (Salto Interno) ---
+      // Si el vehículo recorrió una distancia excesiva con el tanque anterior
+      // O si el rendimiento calculado es absurdo.
+      if (analysisType === 'OK') { // Solo si no falló la continuidad
+        
+        // Criterio 1: Distancia absoluta muy grande para un tanque
+        if (distanciaTramo > 1000) { 
           analysisType = 'GAP_DISTANCE';
-          message = 'Carga Externa Implícita (> 1200 km sin reporte)';
+          message = `Recorrido excesivo (${distanciaTramo.toLocaleString()} km). Posible carga externa.`;
           incidentesCount++;
-        } else if (rendimientoTramo > 20) {
+        } 
+        // Criterio 2: Rendimiento irreal (ej: > 18 km/L en camioneta)
+        // Solo evaluamos si tenemos litros anteriores para comparar
+        else if (index > 0 && rendimientoCalculado > 18) {
            analysisType = 'GAP_DISTANCE';
-           message = 'Rendimiento Irreal (Posible Carga Externa)';
+           message = `Rendimiento irreal (${rendimientoCalculado.toFixed(1)} km/L). Falta carga intermedia.`;
            incidentesCount++;
         }
       }
@@ -91,7 +96,8 @@ const GapsPage = ({ data }) => {
       processedRows.push({
         ...current,
         distanciaTramo,
-        rendimientoTramo,
+        rendimientoCalculado,
+        litrosAnteriores,
         prevOdoEnd,
         analysisType,
         message
@@ -157,7 +163,7 @@ const GapsPage = ({ data }) => {
                   Estado de Auditoría
                 </p>
                 <h3 className={`text-2xl font-black ${auditReport.incidentesCount > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                  {auditReport.incidentesCount > 0 ? `${auditReport.incidentesCount} Anomalías` : 'Datos Consistentes'}
+                  {auditReport.incidentesCount > 0 ? `${auditReport.incidentesCount} Alertas` : 'Datos Consistentes'}
                 </h3>
               </div>
             </div>
@@ -168,8 +174,8 @@ const GapsPage = ({ data }) => {
             <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
               <h3 className="font-bold text-gray-700 text-sm">Historial de Odómetros y Consumo</h3>
               <div className="flex gap-4 text-xs font-medium text-gray-500">
-                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Error Continuidad</span>
-                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Carga Externa</span>
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Salto de Continuidad</span>
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Recorrido Excesivo</span>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -179,13 +185,13 @@ const GapsPage = ({ data }) => {
                     <th className="p-4 pl-6">Fecha</th>
                     <th className="p-4">Estación</th>
                     {/* Bloque Continuidad */}
-                    <th className="p-4 text-right bg-gray-50/50 text-xs uppercase tracking-wider">Cierre Ant.</th>
-                    <th className="p-4 text-right text-xs uppercase tracking-wider">Inicio Act.</th>
+                    <th className="p-4 text-right bg-gray-50/50 text-xs uppercase tracking-wider text-gray-400">Cierre Ant.</th>
+                    <th className="p-4 text-right text-xs uppercase tracking-wider text-gray-400">Inicio Act.</th>
+                    <th className="p-4 text-right">Fin Actual</th>
                     
                     {/* Bloque Consumo */}
-                    <th className="p-4 text-right">Fin Actual</th>
                     <th className="p-4 text-right font-bold text-gray-700 bg-blue-50/30">Kms Rec.</th>
-                    <th className="p-4 text-right">Litros</th>
+                    <th className="p-4 text-right text-xs text-gray-400">Lts (Ant.)</th>
                     <th className="p-4 text-center text-xs uppercase tracking-wider">Rend. (Km/L)</th>
                     
                     <th className="p-4 text-right pr-6">Análisis</th>
@@ -193,7 +199,7 @@ const GapsPage = ({ data }) => {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {auditReport.rows.map((row, idx) => {
-                    // Determinar estilos según el tipo de problema
+                    // Estilos
                     let rowBg = 'hover:bg-gray-50';
                     let statusBadge = 'bg-green-50 text-green-700 border-green-200';
                     let statusIcon = <CheckCircle size={12}/>;
@@ -221,26 +227,28 @@ const GapsPage = ({ data }) => {
                         
                         {/* Continuidad */}
                         <td className="p-4 text-right font-mono text-gray-400 bg-gray-50/50 text-xs">
-                          {idx === 0 ? '-' : row.prevOdoEnd.toLocaleString()}
+                          {idx === 0 ? '-' : row.prevOdoEnd.toLocaleString('es-AR')}
                         </td>
                         <td className={`p-4 text-right font-mono text-xs ${row.analysisType === 'GAP_CONTINUITY' ? 'font-bold text-red-600' : 'text-gray-500'}`}>
-                          {row.odoAnt.toLocaleString()}
+                          {row.odoAnt.toLocaleString('es-AR')}
+                        </td>
+                        <td className="p-4 text-right font-mono text-gray-600">
+                          {row.odoUlt.toLocaleString('es-AR')}
                         </td>
 
                         {/* Datos del Tramo */}
-                        <td className="p-4 text-right font-mono text-gray-600">
-                          {row.odoUlt.toLocaleString()}
-                        </td>
                         <td className="p-4 text-right font-mono font-bold text-blue-700 bg-blue-50/30">
-                          {row.distanciaTramo.toLocaleString()} km
+                          {row.distanciaTramo.toLocaleString('es-AR')}
                         </td>
-                        <td className="p-4 text-right font-bold text-gray-700">
-                          {row.litros.toLocaleString()} L
+                        <td className="p-4 text-right text-gray-400 text-xs">
+                          {idx > 0 ? `${row.litrosAnteriores.toLocaleString('es-AR')} L` : '-'}
                         </td>
                         <td className="p-4 text-center font-mono text-xs">
-                           <span className={`px-2 py-1 rounded ${row.rendimientoTramo > 18 ? 'bg-orange-200 text-orange-800 font-bold' : 'bg-gray-100'}`}>
-                             {row.rendimientoTramo.toFixed(1)}
-                           </span>
+                           {idx > 0 && row.rendimientoCalculado > 0 ? (
+                             <span className={`px-2 py-1 rounded ${row.rendimientoCalculado > 18 ? 'bg-orange-200 text-orange-800 font-bold' : 'bg-gray-100'}`}>
+                               {row.rendimientoCalculado.toFixed(1)}
+                             </span>
+                           ) : '-'}
                         </td>
 
                         <td className="p-4 text-right pr-6">
