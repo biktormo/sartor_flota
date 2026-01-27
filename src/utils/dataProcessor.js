@@ -27,25 +27,23 @@ const findValue = (row, candidates) => {
   return foundKey ? row[foundKey] : null;
 };
 
-// Función para crear un Timestamp (Fecha + Hora) ordenable
+// Generador de Timestamp seguro
 const createTimestamp = (dateStr, timeStr) => {
   if (!dateStr) return 0;
   try {
-    // Asumimos formato DD/MM/YYYY del CSV en español
+    // Formato esperado: DD/MM/YYYY
     if (dateStr.includes('/')) {
       const [day, month, year] = dateStr.split('/').map(num => parseInt(num, 10));
-      
       let hours = 0, minutes = 0, seconds = 0;
-      if (timeStr) {
+      if (timeStr && timeStr.includes(':')) {
         const timeParts = timeStr.split(':').map(num => parseInt(num, 10));
         hours = timeParts[0] || 0;
         minutes = timeParts[1] || 0;
         seconds = timeParts[2] || 0;
       }
-      
-      // Mes en JS es 0-11
       return new Date(year, month - 1, day, hours, minutes, seconds).getTime();
     }
+    // Fallback para otros formatos
     return new Date(dateStr).getTime();
   } catch (e) {
     return 0;
@@ -62,14 +60,15 @@ export const parseCSV = (file) => {
       encoding: "UTF-8",
       transformHeader: (h) => h.trim(),
       complete: (results) => {
-        const processedData = results.data
-          .filter(row => {
-            const lts = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']);
-            return lts !== null && lts !== '';
-          })
+        // Map preliminar para limpieza
+        const mappedData = results.data
           .map((row, index) => {
+            const lts = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']);
+            // Si no hay litros, marcamos para borrar
+            if (!lts) return null;
+
             const costoRaw = findValue(row, ['M.N.', 'M.N', 'IMPORTE', 'NETO', 'COSTO']) || '0';
-            const litrosRaw = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']) || '0';
+            const litrosRaw = lts;
             
             const odoAntRaw = findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR']) || '0';
             const odoUltRaw = findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO']) || '0';
@@ -77,7 +76,7 @@ export const parseCSV = (file) => {
             const odoAnt = cleanNumber(odoAntRaw);
             const odoUlt = cleanNumber(odoUltRaw);
             
-            // Distancia del viaje (dato interno de la fila)
+            // Distancia interna
             let distancia = 0;
             if (odoUlt > odoAnt) {
                 distancia = odoUlt - odoAnt;
@@ -91,17 +90,15 @@ export const parseCSV = (file) => {
             const marcaRaw = findValue(row, ['MARCA']) || '';
             const modeloRaw = findValue(row, ['MODELO']) || '';
             
-            // --- NUEVO: Capturar fecha y hora por separado ---
             const fechaRaw = findValue(row, ['FECHA', 'DATE']) || '';
             const horaRaw = findValue(row, ['HORA', 'TIME']) || '00:00:00';
             const timestamp = createTimestamp(fechaRaw, horaRaw);
-            // -----------------------------------------------
 
             return {
-              id: index,
+              id: index, // ID temporal, luego se filtra
               fecha: fechaRaw,
               hora: horaRaw,
-              timestamp, // Campo numérico para ordenar perfectamente
+              timestamp,
               unidad: unidadRaw,
               placa: findValue(row, ['PLACA', 'PATENTE']) || '',
               marca: marcaRaw,
@@ -116,8 +113,23 @@ export const parseCSV = (file) => {
               odoUlt,
               distancia
             };
-          });
-        resolve(processedData);
+          })
+          .filter(item => item !== null && item.litros > 0); // 1. Eliminar nulos y litros 0
+
+        // 2. ELIMINAR DUPLICADOS EXACTOS
+        // Creamos un "Set" de firmas únicas para detectar repetidos
+        const seen = new Set();
+        const uniqueData = mappedData.filter(item => {
+          // La "firma" de un registro es la combinación de sus datos clave
+          const signature = `${item.timestamp}-${item.unidad}-${item.litros}-${item.odoAnt}`;
+          if (seen.has(signature)) {
+            return false; // Es duplicado, lo saltamos
+          }
+          seen.add(signature);
+          return true; // Es nuevo, lo guardamos
+        });
+
+        resolve(uniqueData);
       },
       error: (error) => reject(error),
     });
@@ -155,25 +167,28 @@ export const calculateKPIs = (data) => {
   return { totalLitros, totalCosto, topConsumers };
 };
 
+// --- ARREGLO PARA GRÁFICO MENSUAL ---
 export const processMonthlyData = (data) => {
   if (!data || data.length === 0) return [];
-  // Se mantiene igual, usamos fechaRaw o timestamp para agrupar
+
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const mesesCompletos = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   const groupedData = {};
 
   data.forEach(row => {
+    // Usamos el timestamp calculado previamente que es más seguro
     if (!row.timestamp) return;
+    
     const dateObj = new Date(row.timestamp);
 
-    if (!isNaN(dateObj)) {
+    if (!isNaN(dateObj.getTime())) {
       const year = dateObj.getFullYear();
       const monthIndex = dateObj.getMonth();
       const key = `${year}-${monthIndex}`;
 
       if (!groupedData[key]) {
         groupedData[key] = {
-          rawDate: dateObj,
+          rawDate: dateObj.getTime(), // Guardamos numérico para ordenar fácil
           name: meses[monthIndex],
           fullName: `${mesesCompletos[monthIndex]} ${year}`,
           year: year,
