@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, FileSearch, ArrowRight, CheckCircle, 
-  Tractor, Calendar, MapPin, Search, Info 
+  Tractor, Calendar, MapPin, Search, AlertCircle // <--- AHORA SÍ ESTÁ IMPORTADO
 } from 'lucide-react';
 
 const GapsPage = ({ data }) => {
@@ -10,6 +10,7 @@ const GapsPage = ({ data }) => {
   // 1. Obtener lista de unidades
   const uniqueUnits = useMemo(() => {
     if (!data) return [];
+    // Filtramos para limpiar basura si la hay
     const units = new Set(data.filter(r => r.unidad && r.unidad !== 'Desconocido').map(r => r.unidad));
     return Array.from(units).sort((a, b) => a.toString().localeCompare(b.toString()));
   }, [data]);
@@ -45,16 +46,15 @@ const GapsPage = ({ data }) => {
       let message = 'Continuo';
       let prevOdoEnd = 0;
       let rendimientoCalculado = 0;
+      let litrosAnteriores = 0;
       
-      // La distancia ya viene calculada limpia desde dataProcessor
       const distanciaTramo = current.distancia;
 
       // --- LOGICA DE RENDIMIENTO (Carga Anterior) ---
-      let litrosAnteriores = 0;
       if (index > 0) {
         const previous = sortedData[index - 1];
         prevOdoEnd = previous.odoUlt;
-        litrosAnteriores = previous.litros; // Usamos los litros de la carga anterior
+        litrosAnteriores = previous.litros; 
 
         // Calcular Rendimiento: Distancia Actual / Litros Anteriores
         if (litrosAnteriores > 0) {
@@ -62,7 +62,6 @@ const GapsPage = ({ data }) => {
         }
 
         // --- VALIDACIÓN 1: CONTINUIDAD (Salto de "Costura") ---
-        // Si el odómetro final anterior no coincide con el inicial actual
         if (prevOdoEnd > 0 && current.odoAnt > 0) {
           const diff = Math.abs(current.odoAnt - prevOdoEnd);
           if (diff > 5) { // Tolerancia 5km
@@ -74,18 +73,14 @@ const GapsPage = ({ data }) => {
       }
 
       // --- VALIDACIÓN 2: AUTONOMÍA (Salto Interno) ---
-      // Si el vehículo recorrió una distancia excesiva con el tanque anterior
-      // O si el rendimiento calculado es absurdo.
-      if (analysisType === 'OK') { // Solo si no falló la continuidad
-        
+      if (analysisType === 'OK') { 
         // Criterio 1: Distancia absoluta muy grande para un tanque
         if (distanciaTramo > 1000) { 
           analysisType = 'GAP_DISTANCE';
           message = `Recorrido excesivo (${distanciaTramo.toLocaleString()} km). Posible carga externa.`;
           incidentesCount++;
         } 
-        // Criterio 2: Rendimiento irreal (ej: > 18 km/L en camioneta)
-        // Solo evaluamos si tenemos litros anteriores para comparar
+        // Criterio 2: Rendimiento irreal
         else if (index > 0 && rendimientoCalculado > 18) {
            analysisType = 'GAP_DISTANCE';
            message = `Rendimiento irreal (${rendimientoCalculado.toFixed(1)} km/L). Falta carga intermedia.`;
