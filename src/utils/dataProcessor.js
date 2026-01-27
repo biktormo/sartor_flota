@@ -2,23 +2,35 @@ import Papa from 'papaparse';
 
 // --- HELPERS ---
 
-// 1. Limpiador de números FORMATO ARGENTINA ESTRICTO (1.000,00)
+// Limpiador estándar para Litros y Costos (respeta decimales)
 const cleanNumber = (val) => {
   if (!val) return 0;
   let str = String(val).trim();
   if (str === '' || str === '-') return 0;
 
-  // Si detectamos formato europeo/argentino (puntos antes que comas, o solo comas)
-  // Ej: 1.250,50 o 34,5
-  
-  // Primero: Quitar TODOS los puntos (separadores de miles)
+  // Eliminar puntos de miles
   str = str.replace(/\./g, '');
-  
-  // Segundo: Reemplazar la coma decimal por punto (para JS)
+  // Reemplazar coma por punto
   str = str.replace(',', '.');
 
   const number = parseFloat(str);
   return isNaN(number) ? 0 : number;
+};
+
+// --- NUEVO: Limpiador Inteligente para Odómetros ---
+// Detecta si el valor está expresado en "miles" (ej: 76,6) y lo corrige
+const cleanOdometer = (val) => {
+  let num = cleanNumber(val);
+  
+  // HEURÍSTICA DE FLOTA:
+  // Si el odómetro es mayor a 0 pero menor a 10.000 km, es altamente probable
+  // que esté formateado como "77,426" (interpretado como 77.426) en lugar de 77426.
+  // Multiplicamos por 1000 para llevarlo a la escala real.
+  if (num > 0 && num < 10000) {
+    num = num * 1000;
+  }
+  
+  return Math.round(num); // Los odómetros suelen ser enteros
 };
 
 const normalizeKey = (str) => {
@@ -36,9 +48,8 @@ const findValue = (row, candidates) => {
 const createTimestamp = (dateStr, timeStr) => {
   if (!dateStr) return 0;
   try {
-    // Intentar formato DD/MM/YYYY
     if (dateStr.includes('/')) {
-      const parts = dateStr.split(' ')[0].split('/'); // Ignorar hora si viene pegada
+      const parts = dateStr.split(' ')[0].split('/'); 
       const day = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const year = parseInt(parts[2], 10);
@@ -68,7 +79,6 @@ export const parseCSV = (file) => {
       encoding: "UTF-8",
       transformHeader: (h) => h.trim(),
       complete: (results) => {
-        // A. PRIMER PASE: Mapeo y Limpieza Básica
         let rawRecords = results.data
           .map((row, index) => {
             const ltsRaw = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']);
@@ -77,26 +87,24 @@ export const parseCSV = (file) => {
             const litros = cleanNumber(ltsRaw);
             const costo = cleanNumber(findValue(row, ['M.N.', 'M.N', 'IMPORTE', 'NETO']) || '0');
             
-            // Odómetros
-            const odoAnt = cleanNumber(findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR']) || '0');
-            const odoUlt = cleanNumber(findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO']) || '0');
+            // --- USAMOS EL LIMPIADOR ESPECIAL PARA ODÓMETROS ---
+            const odoAnt = cleanOdometer(findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR']) || '0');
+            const odoUlt = cleanOdometer(findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO']) || '0');
+            // ---------------------------------------------------
             
-            // Distancia del tramo (Dato interno)
             let distancia = 0;
             if (odoUlt > odoAnt) distancia = odoUlt - odoAnt;
 
-            // Fechas
             const fechaRaw = findValue(row, ['FECHA', 'DATE']) || '';
             const horaRaw = findValue(row, ['HORA', 'TIME']) || '00:00:00';
             const timestamp = createTimestamp(fechaRaw, horaRaw);
 
-            // Datos Extra
             const unidad = findValue(row, ['UNIDAD', 'MOVIL', 'VEHICULO']) || 'Desconocido';
             const transaccion = findValue(row, ['TRANSACCIÓN', 'TIPO']) || 'CONSUMO';
 
             return {
-              id: index, // ID temporal
-              rawId: index, // Para rastrear eliminaciones
+              id: index,
+              rawId: index,
               fecha: fechaRaw,
               hora: horaRaw,
               timestamp,
@@ -116,36 +124,25 @@ export const parseCSV = (file) => {
               esReversion: litros < 0 || (transaccion && transaccion.toUpperCase().includes('REVERSI'))
             };
           })
-          .filter(r => r !== null && r.litros !== 0); // Quitar filas vacías o litros 0
+          .filter(r => r !== null && r.litros !== 0);
 
-        // B. SEGUNDO PASE: Lógica de Reversiones (Eliminar la anulación y la carga original)
-        // Estrategia: Identificar negativos y buscar su par positivo (misma unidad, mismo valor abs)
+        // Lógica de Reversiones (se mantiene igual)
         const indicesToDelete = new Set();
-
-        rawRecords.forEach((record, idx) => {
+        rawRecords.forEach((record) => {
           if (record.litros < 0) {
-            // Es una reversión. Marcamos esta fila para borrar.
             indicesToDelete.add(record.rawId);
-
-            // Buscamos la fila positiva correspondiente
-            // Debe ser: misma unidad, mismos litros (en positivo), y anterior o igual en fecha
             const target = rawRecords.find(r => 
-              !indicesToDelete.has(r.rawId) && // Que no esté borrada ya
+              !indicesToDelete.has(r.rawId) && 
               r.unidad === record.unidad && 
-              Math.abs(r.litros - Math.abs(record.litros)) < 0.1 && // Tolerancia decimal
+              Math.abs(r.litros - Math.abs(record.litros)) < 0.1 && 
               r.litros > 0
             );
-
-            if (target) {
-              indicesToDelete.add(target.rawId); // Borramos también la positiva
-            }
+            if (target) indicesToDelete.add(target.rawId);
           }
         });
 
-        // Filtrar las marcadas
         const cleanData = rawRecords.filter(r => !indicesToDelete.has(r.rawId));
 
-        // Ordenar por Odómetro (Físico) por defecto
         cleanData.sort((a, b) => {
            if (a.odoAnt > 0 && b.odoAnt > 0) return a.odoAnt - b.odoAnt;
            return a.timestamp - b.timestamp;
@@ -189,7 +186,6 @@ export const calculateKPIs = (data) => {
   return { totalLitros, totalCosto, topConsumers };
 };
 
-// Arreglo para que el gráfico mensual siempre funcione
 export const processMonthlyData = (data) => {
   if (!data || data.length === 0) return [];
 
@@ -198,10 +194,8 @@ export const processMonthlyData = (data) => {
   const groupedData = {};
 
   data.forEach(row => {
-    // Si no hay timestamp, intentamos usar fecha string
     let dateObj = row.timestamp ? new Date(row.timestamp) : null;
     
-    // Fallback de seguridad
     if (!dateObj || isNaN(dateObj.getTime())) {
        if (row.fecha && row.fecha.includes('/')) {
           const parts = row.fecha.split('/');
