@@ -1,86 +1,106 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, FileSearch, ArrowRight, CheckCircle, 
-  Tractor, Calendar, MapPin, Search 
+  Tractor, Calendar, MapPin, Search, Fuel, AlertCircle, Gauge
 } from 'lucide-react';
 
 const GapsPage = ({ data }) => {
   const [selectedUnit, setSelectedUnit] = useState('');
 
-  // 1. Obtener lista de unidades para el selector
+  // 1. Obtener lista de unidades
   const uniqueUnits = useMemo(() => {
     if (!data) return [];
-    const units = new Set(data.map(r => r.unidad));
+    // Filtramos para limpiar basura si la hay
+    const units = new Set(data.filter(r => r.unidad && r.unidad !== 'Desconocido').map(r => r.unidad));
     return Array.from(units).sort();
   }, [data]);
 
-  // 2. Lógica Core: Análisis de Saltos
+  // 2. Lógica Core: Análisis de Saltos y Consistencia
   const auditReport = useMemo(() => {
     if (!selectedUnit || !data) return null;
 
-    // A. Filtrar solo la unidad seleccionada
+    // A. Filtrar unidad
     const unitData = data.filter(row => row.unidad === selectedUnit);
 
-    // B. Ordenar CRONOLÓGICAMENTE (Crucial)
-    // Asumimos formato DD/MM/YYYY HH:mm:ss o similar.
-    // Si dataProcessor ya normalizó la fecha, genial. Si no, parseamos aquí.
+    // B. Ordenar CRONOLÓGICAMENTE
     const sortedData = unitData.sort((a, b) => {
-      // Helper para parsear fechas complejas si vienen como string
       const getTime = (dateVal) => {
-        if (dateVal instanceof Date) return dateVal.getTime();
-        // Intento básico de parseo si es string
-        const parts = dateVal.split(/[\/\s:]/); // separar por / espacio o :
-        if (parts.length >= 3) {
-           // Asumiendo DD/MM/YYYY HH:mm
-           return new Date(parts[2], parts[1]-1, parts[0], parts[3]||0, parts[4]||0).getTime();
+        if (!dateVal) return 0;
+        // Parseo manual para DD/MM/YYYY HH:mm:ss
+        if (typeof dateVal === 'string' && dateVal.includes('/')) {
+           const [datePart, timePart] = dateVal.split(' ');
+           const [day, month, year] = datePart.split('/');
+           // Si no hay hora, asumimos 00:00:00
+           const [hour, min, sec] = timePart ? timePart.split(':') : [0, 0, 0];
+           return new Date(year, month - 1, day, hour, min, sec || 0).getTime();
         }
-        return 0; 
+        return new Date(dateVal).getTime(); 
       };
       return getTime(a.fecha) - getTime(b.fecha);
     });
 
-    // C. Detectar Saltos
-    let totalSaltosKm = 0;
-    let totalSaltosCount = 0;
+    // C. Detectar Anomalías
+    let incidentesCount = 0;
     const processedRows = [];
 
     sortedData.forEach((current, index) => {
-      let salto = 0;
-      let isGap = false;
+      let analysisType = 'OK'; // OK, GAP_CONTINUITY, GAP_DISTANCE
+      let message = 'Continuo';
       let prevOdoEnd = 0;
+      
+      // Cálculo de Distancia del Tramo Actual (Dato interno del CSV)
+      // Evitamos negativos por errores de carga manual
+      const distanciaTramo = current.odoUlt > current.odoAnt ? (current.odoUlt - current.odoAnt) : 0;
+      
+      // Cálculo de Rendimiento del Tramo (Km / Litros cargados al final del tramo)
+      // Nota: Asumimos que se llena el tanque. Si no es tanque lleno, el rendimiento será mentiroso, pero sirve de indicador.
+      const rendimientoTramo = current.litros > 0 ? (distanciaTramo / current.litros) : 0;
 
+      // --- VALIDACIÓN 1: CONTINUIDAD (La costura entre registros) ---
       if (index > 0) {
         const previous = sortedData[index - 1];
         prevOdoEnd = previous.odoUlt;
         const currentOdoStart = current.odoAnt;
 
-        // Validamos que los odómetros no sean 0 (errores de carga)
         if (prevOdoEnd > 0 && currentOdoStart > 0) {
-          // El salto es la diferencia entre donde terminó el anterior y donde empezó este
-          const diff = currentOdoStart - prevOdoEnd;
-          
-          // Tolerancia de 2km por movimientos internos en playa
-          if (diff > 2) {
-            salto = diff;
-            isGap = true;
-            totalSaltosKm += diff;
-            totalSaltosCount++;
+          const diff = Math.abs(currentOdoStart - prevOdoEnd);
+          // Tolerancia 5km
+          if (diff > 5) {
+            analysisType = 'GAP_CONTINUITY';
+            message = `Salto de ${diff.toLocaleString()} km entre cargas`;
+            incidentesCount++;
           }
+        }
+      }
+
+      // --- VALIDACIÓN 2: AUTONOMÍA/DISTANCIA (La consistencia interna) ---
+      // Si la distancia recorrida es absurda para un solo tanque (ej: > 1200km)
+      // O si el rendimiento es absurdo (> 18 km/l para una Hilux/Tractor es imposible)
+      if (analysisType === 'OK') {
+        if (distanciaTramo > 1200) { 
+          analysisType = 'GAP_DISTANCE';
+          message = 'Carga Externa Implícita (> 1200 km sin reporte)';
+          incidentesCount++;
+        } else if (rendimientoTramo > 20) {
+           analysisType = 'GAP_DISTANCE';
+           message = 'Rendimiento Irreal (Posible Carga Externa)';
+           incidentesCount++;
         }
       }
 
       processedRows.push({
         ...current,
-        isGap,
-        salto,
-        prevOdoEnd // Guardamos esto para mostrarlo en la UI
+        distanciaTramo,
+        rendimientoTramo,
+        prevOdoEnd,
+        analysisType,
+        message
       });
     });
 
     return {
       rows: processedRows,
-      totalSaltosKm,
-      totalSaltosCount,
+      incidentesCount,
       totalRegistros: sortedData.length
     };
 
@@ -96,7 +116,7 @@ const GapsPage = ({ data }) => {
             <FileSearch className="text-jd-green" size={32} />
             Auditoría de Diferencias
           </h1>
-          <p className="text-gray-500 mt-1">Detecta cargas de combustible realizadas fuera del sistema (saltos de odómetro).</p>
+          <p className="text-gray-500 mt-1">Detecta inconsistencias de odómetro y cargas no reportadas en el sistema.</p>
         </div>
 
         {/* Selector de Unidad */}
@@ -119,7 +139,7 @@ const GapsPage = ({ data }) => {
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
           
           {/* Tarjetas de Resumen */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
               <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Tractor size={24}/></div>
               <div>
@@ -128,26 +148,29 @@ const GapsPage = ({ data }) => {
               </div>
             </div>
 
-            <div className={`p-6 rounded-xl border shadow-sm flex items-center gap-4 ${auditReport.totalSaltosCount > 0 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
-              <div className={`p-3 rounded-lg ${auditReport.totalSaltosCount > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                {auditReport.totalSaltosCount > 0 ? <AlertTriangle size={24}/> : <CheckCircle size={24}/>}
+            <div className={`p-6 rounded-xl border shadow-sm flex items-center gap-4 ${auditReport.incidentesCount > 0 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
+              <div className={`p-3 rounded-lg ${auditReport.incidentesCount > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                {auditReport.incidentesCount > 0 ? <AlertTriangle size={24}/> : <CheckCircle size={24}/>}
               </div>
               <div>
-                <p className={`text-xs font-bold uppercase ${auditReport.totalSaltosCount > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                  Km Fuera de Sistema
+                <p className={`text-xs font-bold uppercase ${auditReport.incidentesCount > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                  Estado de Auditoría
                 </p>
-                <h3 className={`text-2xl font-black ${auditReport.totalSaltosCount > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                  {auditReport.totalSaltosKm.toLocaleString('es-AR')} km
+                <h3 className={`text-2xl font-black ${auditReport.incidentesCount > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                  {auditReport.incidentesCount > 0 ? `${auditReport.incidentesCount} Anomalías` : 'Datos Consistentes'}
                 </h3>
-                <p className="text-xs opacity-70">{auditReport.totalSaltosCount} incidentes detectados</p>
               </div>
             </div>
           </div>
 
           {/* Tabla de Auditoría */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-200 bg-gray-50">
-              <h3 className="font-bold text-gray-700 text-sm">Historial de Continuidad</h3>
+            <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+              <h3 className="font-bold text-gray-700 text-sm">Historial de Odómetros y Consumo</h3>
+              <div className="flex gap-4 text-xs font-medium text-gray-500">
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Error Continuidad</span>
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Carga Externa</span>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -155,66 +178,79 @@ const GapsPage = ({ data }) => {
                   <tr>
                     <th className="p-4 pl-6">Fecha</th>
                     <th className="p-4">Estación</th>
-                    <th className="p-4 text-right bg-gray-50/50">Cierre Anterior</th>
-                    <th className="p-4 text-center"><ArrowRight size={16} className="mx-auto text-gray-300"/></th>
-                    <th className="p-4 text-right bg-blue-50/30 font-bold text-gray-700">Inicio Actual</th>
+                    {/* Bloque Continuidad */}
+                    <th className="p-4 text-right bg-gray-50/50 text-xs uppercase tracking-wider">Cierre Ant.</th>
+                    <th className="p-4 text-right text-xs uppercase tracking-wider">Inicio Act.</th>
+                    
+                    {/* Bloque Consumo */}
                     <th className="p-4 text-right">Fin Actual</th>
+                    <th className="p-4 text-right font-bold text-gray-700 bg-blue-50/30">Kms Rec.</th>
+                    <th className="p-4 text-right">Litros</th>
+                    <th className="p-4 text-center text-xs uppercase tracking-wider">Rend. (Km/L)</th>
+                    
                     <th className="p-4 text-right pr-6">Análisis</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {auditReport.rows.map((row, idx) => (
-                    <tr key={idx} className={`transition-colors ${row.isGap ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'}`}>
-                      <td className="p-4 pl-6 text-gray-600 font-medium whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <Calendar size={14} className="text-gray-400"/> {row.fecha}
-                        </div>
-                      </td>
-                      <td className="p-4 text-gray-500 text-xs truncate max-w-[200px]" title={row.estacion}>
-                        <div className="flex items-center gap-1">
-                          <MapPin size={12}/> {row.estacion}
-                        </div>
-                      </td>
-                      
-                      {/* Lógica Visual de Comparación */}
-                      <td className="p-4 text-right font-mono text-gray-400 bg-gray-50/50">
-                        {idx === 0 ? '-' : row.prevOdoEnd.toLocaleString()}
-                      </td>
-                      
-                      <td className="p-4 text-center">
-                        {row.isGap ? (
-                          <div className="w-full h-0.5 bg-red-300 relative">
-                            <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] font-bold text-red-600 bg-red-100 px-1 rounded">
-                              Salto
-                            </span>
+                  {auditReport.rows.map((row, idx) => {
+                    // Determinar estilos según el tipo de problema
+                    let rowBg = 'hover:bg-gray-50';
+                    let statusBadge = 'bg-green-50 text-green-700 border-green-200';
+                    let statusIcon = <CheckCircle size={12}/>;
+
+                    if (row.analysisType === 'GAP_CONTINUITY') {
+                        rowBg = 'bg-red-50 hover:bg-red-100';
+                        statusBadge = 'bg-red-100 text-red-700 border-red-200';
+                        statusIcon = <AlertTriangle size={12}/>;
+                    } else if (row.analysisType === 'GAP_DISTANCE') {
+                        rowBg = 'bg-orange-50 hover:bg-orange-100';
+                        statusBadge = 'bg-orange-100 text-orange-800 border-orange-200';
+                        statusIcon = <AlertCircle size={12}/>;
+                    }
+
+                    return (
+                      <tr key={idx} className={`transition-colors ${rowBg}`}>
+                        <td className="p-4 pl-6 text-gray-600 font-medium whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <Calendar size={14} className="text-gray-400"/> {row.fecha}
                           </div>
-                        ) : (
-                          <div className="w-full h-px bg-gray-200"></div>
-                        )}
-                      </td>
+                        </td>
+                        <td className="p-4 text-gray-500 text-xs truncate max-w-[150px]" title={row.estacion}>
+                          {row.estacion}
+                        </td>
+                        
+                        {/* Continuidad */}
+                        <td className="p-4 text-right font-mono text-gray-400 bg-gray-50/50 text-xs">
+                          {idx === 0 ? '-' : row.prevOdoEnd.toLocaleString()}
+                        </td>
+                        <td className={`p-4 text-right font-mono text-xs ${row.analysisType === 'GAP_CONTINUITY' ? 'font-bold text-red-600' : 'text-gray-500'}`}>
+                          {row.odoAnt.toLocaleString()}
+                        </td>
 
-                      <td className={`p-4 text-right font-mono font-bold bg-blue-50/30 ${row.isGap ? 'text-red-600' : 'text-gray-700'}`}>
-                        {row.odoAnt.toLocaleString()}
-                      </td>
-                      
-                      <td className="p-4 text-right font-mono text-gray-600">
-                        {row.odoUlt.toLocaleString()}
-                      </td>
+                        {/* Datos del Tramo */}
+                        <td className="p-4 text-right font-mono text-gray-600">
+                          {row.odoUlt.toLocaleString()}
+                        </td>
+                        <td className="p-4 text-right font-mono font-bold text-blue-700 bg-blue-50/30">
+                          {row.distanciaTramo.toLocaleString()} km
+                        </td>
+                        <td className="p-4 text-right font-bold text-gray-700">
+                          {row.litros.toLocaleString()} L
+                        </td>
+                        <td className="p-4 text-center font-mono text-xs">
+                           <span className={`px-2 py-1 rounded ${row.rendimientoTramo > 18 ? 'bg-orange-200 text-orange-800 font-bold' : 'bg-gray-100'}`}>
+                             {row.rendimientoTramo.toFixed(1)}
+                           </span>
+                        </td>
 
-                      <td className="p-4 text-right pr-6">
-                        {row.isGap ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold border border-red-200">
-                            <AlertTriangle size={12} />
-                            +{row.salto.toLocaleString()} km
-                          </span>
-                        ) : (
-                          <span className="text-xs text-green-600 font-medium flex items-center justify-end gap-1">
-                            <CheckCircle size={12}/> Continuo
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="p-4 text-right pr-6">
+                          <div className={`inline-flex items-center justify-end gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border w-full ${statusBadge}`}>
+                            {statusIcon} <span className="truncate max-w-[150px]" title={row.message}>{row.message}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
