@@ -9,6 +9,7 @@ import DriversPage from './pages/DriversPage';
 import StationsPage from './pages/StationsPage';
 import { fetchDashboardData, uploadFleetData, deleteFileAndRecords } from './utils/firebaseService';
 import { calculateKPIs } from './utils/dataProcessor';
+import GapsPage from './pages/GapsPage';
 
 function App() {
   const [fleetData, setFleetData] = useState([]);
@@ -82,6 +83,7 @@ function App() {
               <Route path="/map" element={<StationsPage data={fleetData} />} />
               <Route path="/upload" element={<UploadPage onUploadToCloud={handleUpload} history={uploadHistory} onDelete={handleDelete} />} />
               <Route path="*" element={<div className="p-10 text-center text-gray-500">Página en construcción</div>} />
+              <Route path="/gaps" element={<GapsPage data={fleetData} />} />
             </Routes>
           </main>
         </div>

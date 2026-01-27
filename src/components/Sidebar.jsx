@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Truck, Users, Wrench, Map, 
   FileText, Settings, LogOut, Upload, X 
 } from 'lucide-react';
+import { FileSearch } from 'lucide-react';
 
 const Sidebar = ({ isOpen, onClose }) => {
   const linkClass = ({ isActive }) =>
@@ -62,6 +63,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             <NavLink to="/upload" className={linkClass}><Upload size={18} /> Cargar Datos</NavLink>
             <NavLink to="/reports" className={linkClass}><FileText size={18} /> Reportes</NavLink>
             <NavLink to="/settings" className={linkClass}><Settings size={18} /> Configuración</NavLink>
+            <NavLink to="/gaps" className={linkClass}><FileSearch size={18} /> Auditoría / Diferencias</NavLink>
           </div>
         </nav>
 
