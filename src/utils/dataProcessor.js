@@ -2,23 +2,15 @@ import Papa from 'papaparse';
 
 // --- HELPERS ---
 
-// 1. Limpiador de números FORMATO ARGENTINA (1.000,00)
 const cleanNumber = (val) => {
   if (!val) return 0;
   let str = val.toString().trim();
-  
-  // Si está vacío o es guión
   if (str === '' || str === '-') return 0;
-
-  // Paso 1: Eliminar todos los puntos (separadores de miles)
-  // Ej: "44.851" -> "44851"
-  // Ej: "1.250,50" -> "1250,50"
-  str = str.replace(/\./g, '');
-
-  // Paso 2: Reemplazar la coma por punto (para que JS lo entienda como decimal)
-  // Ej: "1250,50" -> "1250.50"
-  str = str.replace(',', '.');
-
+  if (str.includes(',') && str.includes('.')) {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else if (str.includes(',')) {
+    str = str.replace(',', '.');
+  }
   const number = parseFloat(str);
   return isNaN(number) ? 0 : number;
 };
@@ -33,6 +25,31 @@ const findValue = (row, candidates) => {
   const normalizedCandidates = candidates.map(c => normalizeKey(c));
   const foundKey = keys.find(key => normalizedCandidates.includes(normalizeKey(key)));
   return foundKey ? row[foundKey] : null;
+};
+
+// Función para crear un Timestamp (Fecha + Hora) ordenable
+const createTimestamp = (dateStr, timeStr) => {
+  if (!dateStr) return 0;
+  try {
+    // Asumimos formato DD/MM/YYYY del CSV en español
+    if (dateStr.includes('/')) {
+      const [day, month, year] = dateStr.split('/').map(num => parseInt(num, 10));
+      
+      let hours = 0, minutes = 0, seconds = 0;
+      if (timeStr) {
+        const timeParts = timeStr.split(':').map(num => parseInt(num, 10));
+        hours = timeParts[0] || 0;
+        minutes = timeParts[1] || 0;
+        seconds = timeParts[2] || 0;
+      }
+      
+      // Mes en JS es 0-11
+      return new Date(year, month - 1, day, hours, minutes, seconds).getTime();
+    }
+    return new Date(dateStr).getTime();
+  } catch (e) {
+    return 0;
+  }
 };
 
 // --- FUNCIONES EXPORTADAS ---
@@ -54,11 +71,9 @@ export const parseCSV = (file) => {
             const costoRaw = findValue(row, ['M.N.', 'M.N', 'IMPORTE', 'NETO', 'COSTO']) || '0';
             const litrosRaw = findValue(row, ['LITROS', 'LITRO', 'CANTIDAD']) || '0';
             
-            // Odómetros
             const odoAntRaw = findValue(row, ['ODÓMETRO ANTERIOR', 'ODOMETRO ANTERIOR']) || '0';
             const odoUltRaw = findValue(row, ['ÚLTIMO ODÓMETRO', 'ULTIMO ODOMETRO']) || '0';
             
-            // Usamos la nueva función cleanNumber
             const odoAnt = cleanNumber(odoAntRaw);
             const odoUlt = cleanNumber(odoUltRaw);
             
@@ -75,10 +90,18 @@ export const parseCSV = (file) => {
             const ciudadRaw = findValue(row, ['CIUDAD', 'LOCALIDAD']) || '';
             const marcaRaw = findValue(row, ['MARCA']) || '';
             const modeloRaw = findValue(row, ['MODELO']) || '';
+            
+            // --- NUEVO: Capturar fecha y hora por separado ---
+            const fechaRaw = findValue(row, ['FECHA', 'DATE']) || '';
+            const horaRaw = findValue(row, ['HORA', 'TIME']) || '00:00:00';
+            const timestamp = createTimestamp(fechaRaw, horaRaw);
+            // -----------------------------------------------
 
             return {
               id: index,
-              fecha: findValue(row, ['FECHA', 'DATE']) || '',
+              fecha: fechaRaw,
+              hora: horaRaw,
+              timestamp, // Campo numérico para ordenar perfectamente
               unidad: unidadRaw,
               placa: findValue(row, ['PLACA', 'PATENTE']) || '',
               marca: marcaRaw,
@@ -89,9 +112,9 @@ export const parseCSV = (file) => {
               estacion: estacionRaw,
               direccion: direccionRaw,
               ciudad: ciudadRaw,
-              odoAnt, // Valor numérico limpio
-              odoUlt, // Valor numérico limpio
-              distancia // Valor numérico limpio
+              odoAnt,
+              odoUlt,
+              distancia
             };
           });
         resolve(processedData);
@@ -134,23 +157,16 @@ export const calculateKPIs = (data) => {
 
 export const processMonthlyData = (data) => {
   if (!data || data.length === 0) return [];
-  // (Código de processMonthlyData se mantiene igual que antes)
+  // Se mantiene igual, usamos fechaRaw o timestamp para agrupar
   const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   const mesesCompletos = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   const groupedData = {};
 
   data.forEach(row => {
-    if (!row.fecha) return;
-    let dateObj = null;
-    if (row.fecha.includes('/')) {
-      const [day, month, year] = row.fecha.split('/');
-      const cleanYear = year ? year.split(' ')[0] : null;
-      if (month && cleanYear) dateObj = new Date(cleanYear, parseInt(month) - 1, 1);
-    } else {
-      dateObj = new Date(row.fecha);
-    }
+    if (!row.timestamp) return;
+    const dateObj = new Date(row.timestamp);
 
-    if (dateObj && !isNaN(dateObj)) {
+    if (!isNaN(dateObj)) {
       const year = dateObj.getFullYear();
       const monthIndex = dateObj.getMonth();
       const key = `${year}-${monthIndex}`;

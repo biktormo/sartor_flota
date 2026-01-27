@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, FileSearch, ArrowRight, CheckCircle, 
-  Tractor, Calendar, MapPin, Search, AlertCircle // <--- AHORA SÍ ESTÁ IMPORTADO
+  Tractor, Calendar, MapPin, Search, Info 
 } from 'lucide-react';
 
 const GapsPage = ({ data }) => {
@@ -10,7 +10,6 @@ const GapsPage = ({ data }) => {
   // 1. Obtener lista de unidades
   const uniqueUnits = useMemo(() => {
     if (!data) return [];
-    // Filtramos para limpiar basura si la hay
     const units = new Set(data.filter(r => r.unidad && r.unidad !== 'Desconocido').map(r => r.unidad));
     return Array.from(units).sort((a, b) => a.toString().localeCompare(b.toString()));
   }, [data]);
@@ -22,20 +21,8 @@ const GapsPage = ({ data }) => {
     // A. Filtrar unidad
     const unitData = data.filter(row => row.unidad === selectedUnit);
 
-    // B. Ordenar CRONOLÓGICAMENTE
-    const sortedData = unitData.sort((a, b) => {
-      const getTime = (dateVal) => {
-        if (!dateVal) return 0;
-        if (typeof dateVal === 'string' && dateVal.includes('/')) {
-           const [datePart, timePart] = dateVal.split(' ');
-           const [day, month, year] = datePart.split('/');
-           const [hour, min, sec] = timePart ? timePart.split(':') : [0, 0, 0];
-           return new Date(year, month - 1, day, hour, min, sec || 0).getTime();
-        }
-        return new Date(dateVal).getTime(); 
-      };
-      return getTime(a.fecha) - getTime(b.fecha);
-    });
+    // B. Ordenar CRONOLÓGICAMENTE (USANDO TIMESTAMP PRECISO)
+    const sortedData = unitData.sort((a, b) => a.timestamp - b.timestamp);
 
     // C. Detectar Anomalías
     let incidentesCount = 0;
@@ -62,11 +49,18 @@ const GapsPage = ({ data }) => {
         }
 
         // --- VALIDACIÓN 1: CONTINUIDAD (Salto de "Costura") ---
+        // Chequear si el odómetro retrocedió o saltó adelante
         if (prevOdoEnd > 0 && current.odoAnt > 0) {
-          const diff = Math.abs(current.odoAnt - prevOdoEnd);
-          if (diff > 5) { // Tolerancia 5km
+          const diff = current.odoAnt - prevOdoEnd;
+          
+          if (Math.abs(diff) > 5) { // Tolerancia 5km
             analysisType = 'GAP_CONTINUITY';
-            message = `Salto de ${diff.toLocaleString('es-AR')} km entre cargas`;
+            
+            if (diff < 0) {
+               message = `Error Cronológico: Odómetro retrocedió ${Math.abs(diff).toLocaleString('es-AR')} km`;
+            } else {
+               message = `Salto de ${diff.toLocaleString('es-AR')} km entre cargas`;
+            }
             incidentesCount++;
           }
         }
@@ -169,7 +163,7 @@ const GapsPage = ({ data }) => {
             <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
               <h3 className="font-bold text-gray-700 text-sm">Historial de Odómetros y Consumo</h3>
               <div className="flex gap-4 text-xs font-medium text-gray-500">
-                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Salto de Continuidad</span>
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Salto / Error Cronológico</span>
                  <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Recorrido Excesivo</span>
               </div>
             </div>
@@ -177,7 +171,7 @@ const GapsPage = ({ data }) => {
               <table className="w-full text-left text-sm">
                 <thead className="bg-white text-gray-500 font-semibold border-b border-gray-200">
                   <tr>
-                    <th className="p-4 pl-6">Fecha</th>
+                    <th className="p-4 pl-6">Fecha y Hora</th>
                     <th className="p-4">Estación</th>
                     {/* Bloque Continuidad */}
                     <th className="p-4 text-right bg-gray-50/50 text-xs uppercase tracking-wider text-gray-400">Cierre Ant.</th>
@@ -212,8 +206,9 @@ const GapsPage = ({ data }) => {
                     return (
                       <tr key={idx} className={`transition-colors ${rowBg}`}>
                         <td className="p-4 pl-6 text-gray-600 font-medium whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <Calendar size={14} className="text-gray-400"/> {row.fecha}
+                          <div className="flex flex-col">
+                            <span className="flex items-center gap-2"><Calendar size={14} className="text-gray-400"/> {row.fecha}</span>
+                            <span className="text-xs text-gray-400 ml-6">{row.hora}</span>
                           </div>
                         </td>
                         <td className="p-4 text-gray-500 text-xs truncate max-w-[150px]" title={row.estacion}>
