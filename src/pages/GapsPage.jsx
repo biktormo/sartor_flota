@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, FileSearch, ArrowRight, CheckCircle, 
-  Tractor, Calendar, MapPin, Search, Info, AlertCircle // <--- AHORA SÍ ESTÁ AGREGADO AQUÍ
+  Tractor, Calendar, MapPin, Search, Info, AlertCircle 
 } from 'lucide-react';
 
 const GapsPage = ({ data }) => {
@@ -14,20 +14,44 @@ const GapsPage = ({ data }) => {
     return Array.from(units).sort((a, b) => a.toString().localeCompare(b.toString()));
   }, [data]);
 
-  // 2. Lógica Core: Análisis de Saltos y Consistencia
+  // 2. Lógica Core
   const auditReport = useMemo(() => {
     if (!selectedUnit || !data) return null;
 
     // A. Filtrar unidad
     const unitData = data.filter(row => row.unidad === selectedUnit);
 
-    // B. Ordenar CRONOLÓGICAMENTE (USANDO TIMESTAMP PRECISO)
-    // El timestamp ya viene creado desde dataProcessor usando Fecha + Hora
+    // B. Ordenar CRONOLÓGICAMENTE (LÓGICA CORREGIDA ROBUSTA)
     const sortedData = unitData.sort((a, b) => {
-        // Fallback por si dataProcessor antiguo no generó timestamp
-        const timeA = a.timestamp || new Date(a.fecha).getTime();
-        const timeB = b.timestamp || new Date(b.fecha).getTime();
-        return timeA - timeB;
+      // Función auxiliar para convertir DD/MM/YYYY HH:mm:ss a milisegundos
+      const getExactTime = (row) => {
+        try {
+          if (!row.fecha) return 0;
+          
+          // Parsear fecha: 12/08/2025
+          const dateParts = row.fecha.split('/');
+          if (dateParts.length !== 3) return 0;
+          
+          const day = parseInt(dateParts[0], 10);
+          const month = parseInt(dateParts[1], 10) - 1; // JS meses son 0-11
+          const year = parseInt(dateParts[2], 10);
+
+          // Parsear hora: 07:17:56 (si existe, sino 00:00:00)
+          let hours = 0, minutes = 0, seconds = 0;
+          if (row.hora && row.hora.includes(':')) {
+            const timeParts = row.hora.split(':');
+            hours = parseInt(timeParts[0], 10) || 0;
+            minutes = parseInt(timeParts[1], 10) || 0;
+            seconds = parseInt(timeParts[2], 10) || 0;
+          }
+
+          return new Date(year, month, day, hours, minutes, seconds).getTime();
+        } catch (error) {
+          return 0;
+        }
+      };
+
+      return getExactTime(a) - getExactTime(b);
     });
 
     // C. Detectar Anomalías
@@ -49,21 +73,21 @@ const GapsPage = ({ data }) => {
         prevOdoEnd = previous.odoUlt;
         litrosAnteriores = previous.litros; 
 
-        // Calcular Rendimiento: Distancia Actual / Litros Anteriores
         if (litrosAnteriores > 0) {
             rendimientoCalculado = distanciaTramo / litrosAnteriores;
         }
 
-        // --- VALIDACIÓN 1: CONTINUIDAD (Salto de "Costura") ---
-        // Chequear si el odómetro retrocedió o saltó adelante
+        // --- VALIDACIÓN 1: CONTINUIDAD ---
         if (prevOdoEnd > 0 && current.odoAnt > 0) {
-          const diff = current.odoAnt - prevOdoEnd;
+          const diff = current.odoAnt - prevOdoEnd; // Diferencia matemática
           
-          if (Math.abs(diff) > 5) { // Tolerancia 5km
+          // Si hay diferencia (positiva o negativa) mayor a 5km
+          if (Math.abs(diff) > 5) { 
             analysisType = 'GAP_CONTINUITY';
             
             if (diff < 0) {
-               message = `Error Cronológico: Odómetro retrocedió ${Math.abs(diff).toLocaleString('es-AR')} km`;
+               // Si el odómetro bajó, es un error cronológico grave (o vuelta de reloj)
+               message = `Error Cronológico: Odómetro bajó ${Math.abs(diff).toLocaleString('es-AR')} km`;
             } else {
                message = `Salto de ${diff.toLocaleString('es-AR')} km entre cargas`;
             }
@@ -72,18 +96,16 @@ const GapsPage = ({ data }) => {
         }
       }
 
-      // --- VALIDACIÓN 2: AUTONOMÍA (Salto Interno) ---
+      // --- VALIDACIÓN 2: AUTONOMÍA ---
       if (analysisType === 'OK') { 
-        // Criterio 1: Distancia absoluta muy grande para un tanque
         if (distanciaTramo > 1000) { 
           analysisType = 'GAP_DISTANCE';
           message = `Recorrido excesivo (${distanciaTramo.toLocaleString()} km). Posible carga externa.`;
           incidentesCount++;
         } 
-        // Criterio 2: Rendimiento irreal
         else if (index > 0 && rendimientoCalculado > 18) {
            analysisType = 'GAP_DISTANCE';
-           message = `Rendimiento irreal (${rendimientoCalculado.toFixed(1)} km/L). Falta carga intermedia.`;
+           message = `Rendimiento irreal (${rendimientoCalculado.toFixed(1)} km/L). Falta carga.`;
            incidentesCount++;
         }
       }
@@ -117,10 +139,9 @@ const GapsPage = ({ data }) => {
             <FileSearch className="text-jd-green" size={32} />
             Auditoría de Diferencias
           </h1>
-          <p className="text-gray-500 mt-1">Detecta inconsistencias de odómetro y cargas no reportadas en el sistema.</p>
+          <p className="text-gray-500 mt-1">Análisis cronológico estricto por Fecha y Hora.</p>
         </div>
 
-        {/* Selector de Unidad */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
           <select 
@@ -139,7 +160,7 @@ const GapsPage = ({ data }) => {
       {selectedUnit && auditReport ? (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
           
-          {/* Tarjetas de Resumen */}
+          {/* Tarjetas Resumen */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
               <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Tractor size={24}/></div>
@@ -164,13 +185,13 @@ const GapsPage = ({ data }) => {
             </div>
           </div>
 
-          {/* Tabla de Auditoría */}
+          {/* Tabla */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-              <h3 className="font-bold text-gray-700 text-sm">Historial de Odómetros y Consumo</h3>
+              <h3 className="font-bold text-gray-700 text-sm">Historial Cronológico</h3>
               <div className="flex gap-4 text-xs font-medium text-gray-500">
-                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Salto / Error Cronológico</span>
-                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Recorrido Excesivo</span>
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500"></div> Error de Salto</span>
+                 <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-orange-500"></div> Rendimiento Irreal</span>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -179,22 +200,17 @@ const GapsPage = ({ data }) => {
                   <tr>
                     <th className="p-4 pl-6">Fecha y Hora</th>
                     <th className="p-4">Estación</th>
-                    {/* Bloque Continuidad */}
-                    <th className="p-4 text-right bg-gray-50/50 text-xs uppercase tracking-wider text-gray-400">Cierre Ant.</th>
-                    <th className="p-4 text-right text-xs uppercase tracking-wider text-gray-400">Inicio Act.</th>
+                    <th className="p-4 text-right bg-gray-50/50 text-xs uppercase text-gray-400">Cierre Ant.</th>
+                    <th className="p-4 text-right text-xs uppercase text-gray-400">Inicio Act.</th>
                     <th className="p-4 text-right">Fin Actual</th>
-                    
-                    {/* Bloque Consumo */}
                     <th className="p-4 text-right font-bold text-gray-700 bg-blue-50/30">Kms Rec.</th>
                     <th className="p-4 text-right text-xs text-gray-400">Lts (Ant.)</th>
-                    <th className="p-4 text-center text-xs uppercase tracking-wider">Rend. (Km/L)</th>
-                    
+                    <th className="p-4 text-center text-xs uppercase">Rend. (Km/L)</th>
                     <th className="p-4 text-right pr-6">Análisis</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {auditReport.rows.map((row, idx) => {
-                    // Estilos
                     let rowBg = 'hover:bg-gray-50';
                     let statusBadge = 'bg-green-50 text-green-700 border-green-200';
                     let statusIcon = <CheckCircle size={12}/>;
@@ -213,26 +229,18 @@ const GapsPage = ({ data }) => {
                       <tr key={idx} className={`transition-colors ${rowBg}`}>
                         <td className="p-4 pl-6 text-gray-600 font-medium whitespace-nowrap">
                           <div className="flex flex-col">
-                            <span className="flex items-center gap-2"><Calendar size={14} className="text-gray-400"/> {row.fecha}</span>
-                            <span className="text-xs text-gray-400 ml-6">{row.hora}</span>
+                            <span>{row.fecha}</span>
+                            <span className="text-xs text-gray-400">{row.hora}</span>
                           </div>
                         </td>
-                        <td className="p-4 text-gray-500 text-xs truncate max-w-[150px]" title={row.estacion}>
-                          {row.estacion}
-                        </td>
-                        
-                        {/* Continuidad */}
+                        <td className="p-4 text-gray-500 text-xs truncate max-w-[150px]">{row.estacion}</td>
                         <td className="p-4 text-right font-mono text-gray-400 bg-gray-50/50 text-xs">
                           {idx === 0 ? '-' : row.prevOdoEnd.toLocaleString('es-AR')}
                         </td>
                         <td className={`p-4 text-right font-mono text-xs ${row.analysisType === 'GAP_CONTINUITY' ? 'font-bold text-red-600' : 'text-gray-500'}`}>
                           {row.odoAnt.toLocaleString('es-AR')}
                         </td>
-                        <td className="p-4 text-right font-mono text-gray-600">
-                          {row.odoUlt.toLocaleString('es-AR')}
-                        </td>
-
-                        {/* Datos del Tramo */}
+                        <td className="p-4 text-right font-mono text-gray-600">{row.odoUlt.toLocaleString('es-AR')}</td>
                         <td className="p-4 text-right font-mono font-bold text-blue-700 bg-blue-50/30">
                           {row.distanciaTramo.toLocaleString('es-AR')}
                         </td>
@@ -246,7 +254,6 @@ const GapsPage = ({ data }) => {
                              </span>
                            ) : '-'}
                         </td>
-
                         <td className="p-4 text-right pr-6">
                           <div className={`inline-flex items-center justify-end gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border w-full ${statusBadge}`}>
                             {statusIcon} <span className="truncate max-w-[150px]" title={row.message}>{row.message}</span>
@@ -263,7 +270,7 @@ const GapsPage = ({ data }) => {
       ) : (
         <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-gray-400">
           <Tractor size={48} className="mb-4 opacity-20" />
-          <p>Selecciona una unidad arriba para auditar sus odómetros.</p>
+          <p>Selecciona una unidad arriba para comenzar la auditoría.</p>
         </div>
       )}
     </div>
