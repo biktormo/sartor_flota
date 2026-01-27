@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, FileSearch, ArrowRight, CheckCircle, 
-  Tractor, Calendar, MapPin, Search, Info 
+  Tractor, Calendar, MapPin, Search, Info, AlertCircle // <--- AHORA SÍ ESTÁ AGREGADO AQUÍ
 } from 'lucide-react';
 
 const GapsPage = ({ data }) => {
@@ -22,7 +22,13 @@ const GapsPage = ({ data }) => {
     const unitData = data.filter(row => row.unidad === selectedUnit);
 
     // B. Ordenar CRONOLÓGICAMENTE (USANDO TIMESTAMP PRECISO)
-    const sortedData = unitData.sort((a, b) => a.timestamp - b.timestamp);
+    // El timestamp ya viene creado desde dataProcessor usando Fecha + Hora
+    const sortedData = unitData.sort((a, b) => {
+        // Fallback por si dataProcessor antiguo no generó timestamp
+        const timeA = a.timestamp || new Date(a.fecha).getTime();
+        const timeB = b.timestamp || new Date(b.fecha).getTime();
+        return timeA - timeB;
+    });
 
     // C. Detectar Anomalías
     let incidentesCount = 0;
