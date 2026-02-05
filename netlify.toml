@@ -3,6 +3,13 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# 1. REGLA API: Manda todo lo que sea /api/... a la función oculta
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# 2. REGLA REACT: Todo lo demás, mándalo al index.html
 [[redirects]]
   from = "/*"
   to = "/index.html"

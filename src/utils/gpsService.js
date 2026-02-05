@@ -3,7 +3,7 @@
 // 1. Obtener lista de vehículos
 export const fetchGpsAssets = async () => {
     try {
-      const response = await fetch('/.netlify/functions/cybermapa?endpoint=assets');
+      const response = await fetch('/api/cybermapa?endpoint=assets');
       const json = await response.json();
       
       // Cybermapa suele devolver un array en una propiedad data o root. Ajustar según respuesta real.
@@ -32,7 +32,7 @@ export const fetchGpsAssets = async () => {
       const fromStr = format(dateFrom);
       const toStr = format(dateTo);
       
-      const response = await fetch(`/.netlify/functions/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
+      const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
       const json = await response.json();
       
       // Aquí Cybermapa devolverá un historial de puntos.
