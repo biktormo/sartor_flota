@@ -1,7 +1,7 @@
 export const handler = async (event, context) => {
     // --- CAMBIO AQUÍ: URL ESPECÍFICA DE COMMERS ---
     // Basado en tu link, la API suele estar en la carpeta /json/
-    const API_URL = 'https://gps.commers.com.ar/StreetZ/json/'; 
+    const API_URL = 'https://api.cybermapa.com/v1/json/'; 
   
     const USER = process.env.CYBERMAPA_USER;
     const PASS = process.env.CYBERMAPA_PASS;
