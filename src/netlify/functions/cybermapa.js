@@ -1,52 +1,50 @@
 export const handler = async (event, context) => {
-    // URLs base según documentación (ajustar si Commers usa un dominio distinto)
-    // Generalmente es: https://api.cybermapa.com/v1/json/
-    // Si Commers tiene su propia URL de API, reemplázala aquí.
-    const API_URL = 'https://api.cybermapa.com/v1/json/'; 
+    // --- CAMBIO AQUÍ: URL ESPECÍFICA DE COMMERS ---
+    // Basado en tu link, la API suele estar en la carpeta /json/
+    const API_URL = 'https://gps.commers.com.ar/StreetZ/json/'; 
   
     const USER = process.env.CYBERMAPA_USER;
     const PASS = process.env.CYBERMAPA_PASS;
   
-    // Obtenemos qué quiere el frontend (assets o history)
+    // Validación rápida de credenciales
+    if (!USER || !PASS) {
+      return { statusCode: 500, body: JSON.stringify({ error: "Faltan credenciales en Netlify" }) };
+    }
+  
     const { endpoint, from, to, patente } = event.queryStringParameters;
   
-    // Configuramos el cuerpo del mensaje según la documentación
     let bodyPayload = {
       user: USER,
       pwd: PASS,
-      output: 'json' // Pedimos JSON explícitamente
+      output: 'json'
     };
   
-    // 1. Caso: Listar Vehículos (DATOSACTUALES)
+    // Configurar acción según endpoint
     if (endpoint === 'assets') {
       bodyPayload.action = 'DATOSACTUALES';
-    } 
-    
-    // 2. Caso: Historial de un vehículo (DATOSHISTORICOS)
-    else if (endpoint === 'history') {
+    } else if (endpoint === 'history') {
       bodyPayload.action = 'DATOSHISTORICOS';
-      bodyPayload.vehiculo = patente; // Cybermapa pide Patente o ID
-      bodyPayload.desde = from;       // Formato: YYYY-MM-DD HH:MM:SS
+      bodyPayload.vehiculo = patente;
+      bodyPayload.desde = from;
       bodyPayload.hasta = to;
     }
   
     try {
       const response = await fetch(API_URL, {
-        method: 'POST', // Siempre POST
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyPayload)
       });
   
       if (!response.ok) {
-        return { statusCode: response.status, body: `Error API: ${response.statusText}` };
+        return { statusCode: response.status, body: `Error Servidor GPS: ${response.statusText}` };
       }
   
       const data = await response.json();
   
-      // Verificamos si Cybermapa devolvió un error lógico (ej: "Usuario incorrecto")
-      if (data.error || data.result === 'error') {
+      // Manejo de errores lógicos de la API (Login fallido, etc)
+      if (data.result === 'error' || data.error) {
+         console.error("Error API GPS:", data);
          return { statusCode: 400, body: JSON.stringify(data) };
       }
   
@@ -57,6 +55,6 @@ export const handler = async (event, context) => {
       };
   
     } catch (error) {
-      return { statusCode: 500, body: error.toString() };
+      return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
     }
   };
