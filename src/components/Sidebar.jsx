@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, Truck, Users, Wrench, Map, 
-  FileText, Settings, LogOut, Upload, X 
+  FileText, Settings, LogOut, Upload, X, Download, Satellite 
 } from 'lucide-react';
 import { FileSearch } from 'lucide-react';
 
@@ -46,7 +46,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         </div>
 
         {/* NAVEGACIÓN */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
           {/* Al hacer clic en un link en móvil, cerramos el menú */}
           <div onClick={() => window.innerWidth < 768 && onClose()}>
             <NavLink to="/" className={linkClass}><LayoutDashboard size={18} /> Panel General</NavLink>
@@ -59,6 +59,8 @@ const Sidebar = ({ isOpen, onClose }) => {
               </div>
             </NavLink>
             <NavLink to="/map" className={linkClass}><Map size={18} /> Mapa de Flota</NavLink>
+            <NavLink to="/gaps" className={linkClass}><FileSearch size={18} /> Auditoría / Diferencias</NavLink>
+            <NavLink to="/gps-check" className={linkClass}><Satellite size={18} /> Control GPS</NavLink>
             <div className="my-4 border-t border-gray-100"></div>
             <NavLink to="/upload" className={linkClass}><Upload size={18} /> Cargar Datos</NavLink>
             <NavLink to="/reports" className={linkClass}><FileText size={18} /> Reportes</NavLink>
