@@ -10,13 +10,11 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // --- NUEVA ESTRUCTURA DEL PAYLOAD (IMITANDO LA CAPTURA) ---
+  // Estructura base del Payload
   let bodyPayload = {
-    FUNC: "", // Lo llenaremos abajo
     session: {
       user: USER,
       pwd: PASS,
-      // Estos son valores fijos que vimos en la captura, los replicamos
       lang: "es",
       production: 1,
       temporalInvitationModeEnabled: 0,
@@ -24,23 +22,20 @@ export const handler = async (event, context) => {
     }
   };
 
-  // Asumimos que para listar vehículos se usa una FUNC específica (ej: 'GETUNITS')
-  // Como no la sabemos, tendremos que adivinar o encontrarla. Probemos con la estándar.
+  // --- LÓGICA DE FUNCIONES (FUNC) ---
   if (endpoint === 'assets') {
-    // La documentación antigua usaba 'DATOSACTUALES', pero este sistema parece diferente.
-    // Probaremos con 'GETLASTDATA' o 'GETUNITS' que son comunes.
-    // Si esto falla, aquí es donde necesitamos espiar otra vez para ver qué FUNC usa.
-    bodyPayload.FUNC = 'INITIALIZE'; 
-    bodyPayload.paramsData = {};
-  } 
-  
-  // Para historial, la FUNC será algo como 'GETHISTORY'
-  else if (endpoint === 'history') {
-    bodyPayload.FUNC = 'GETHISTORY';
+    bodyPayload.FUNC = 'INITIALIZE';
     bodyPayload.paramsData = {
-      // Ajustar nombres de parámetros según lo que espere el servidor
-      id: patente,
-      beginDate: from, // formato YYYY-MM-DD HH:mm:ss
+      auditReEntry: true // Parámetro visto en la captura
+    };
+  } 
+  else if (endpoint === 'history') {
+    // Para historial, la FUNC será probablemente 'GETHISTORY' o similar
+    // Mantenemos la estructura que teníamos antes, ajustando si es necesario
+    bodyPayload.FUNC = 'GETHISTORY'; 
+    bodyPayload.paramsData = {
+      id: patente, // Suponemos que pide el ID del vehículo
+      beginDate: from, 
       endDate: to,
     };
   }
@@ -48,10 +43,7 @@ export const handler = async (event, context) => {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(bodyPayload)
     });
 
