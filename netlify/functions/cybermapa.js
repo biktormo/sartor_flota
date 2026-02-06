@@ -10,7 +10,6 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Estructura base del Payload
   let bodyPayload = {
     session: {
       user: USER,
@@ -22,19 +21,14 @@ export const handler = async (event, context) => {
     }
   };
 
-  // --- LÓGICA DE FUNCIONES (FUNC) ---
   if (endpoint === 'assets') {
     bodyPayload.FUNC = 'INITIALIZE';
-    bodyPayload.paramsData = {
-      auditReEntry: true // Parámetro visto en la captura
-    };
+    bodyPayload.paramsData = { auditReEntry: true };
   } 
   else if (endpoint === 'history') {
-    // Para historial, la FUNC será probablemente 'GETHISTORY' o similar
-    // Mantenemos la estructura que teníamos antes, ajustando si es necesario
     bodyPayload.FUNC = 'GETHISTORY'; 
     bodyPayload.paramsData = {
-      id: patente, // Suponemos que pide el ID del vehículo
+      id: patente,
       beginDate: from, 
       endDate: to,
     };
@@ -43,7 +37,12 @@ export const handler = async (event, context) => {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        // --- LÍNEA AÑADIDA AQUÍ ---
+        'Referer': 'https://gps.commers.com.ar/StreetZ/'
+      },
       body: JSON.stringify(bodyPayload)
     });
 
