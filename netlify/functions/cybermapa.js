@@ -8,6 +8,7 @@ export const handler = async (event, context) => {
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
   // Estructura de sesión validada (La que funcionó en tu prueba)
+  // Veamos que sale
   const sessionData = {
     user: USER,
     pwd: PASS,
