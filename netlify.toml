@@ -1,14 +1,17 @@
-[functions]
-  directory = "netlify/functions"
-
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"  # <--- ESTA LINEA ES LA CLAVE
 
+[functions]
+  node_bundler = "esbuild"
+
+# Redirección directa para evitar problemas de CORS y rutas
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
+  force = true
 
 [[redirects]]
   from = "/*"

@@ -1,27 +1,38 @@
 // src/utils/gpsService.js
 
-// 1. Obtener lista de vehículos
 export const fetchGpsAssets = async () => {
+    // Usamos la ruta /api/ que configuramos en netlify.toml
+    const url = '/api/cybermapa?endpoint=assets';
+    
+    console.log("🚀 Intentando conectar a:", url); // <--- Nuevo log para depurar
+  
     try {
-      // --- CAMBIO CRÍTICO: Ruta directa a la función ---
-      // Usamos '/.netlify/functions/' en lugar de '/api/' para evitar errores de redirección
-      const response = await fetch('/.netlify/functions/cybermapa?endpoint=assets');
+      const response = await fetch(url);
       
+      // Si la redirección falla o la función no existe
+      if (response.status === 404) {
+        throw new Error("Funciones no encontradas (404). Revisa el archivo netlify.toml");
+      }
+  
       if (!response.ok) {
           const errorText = await response.text();
           throw new Error(`Error de red: ${response.status} - ${errorText}`);
       }
   
       const json = await response.json();
-      
-      console.log("📡 GPS ASSETS:", json);
+      console.log("📡 GPS ASSETS RECIBIDOS:", json);
   
-      // Intentar encontrar el array en distintas estructuras posibles
+      // Búsqueda flexible del array de datos
       let rawAssets = [];
       if (Array.isArray(json)) rawAssets = json;
       else if (json.data) rawAssets = json.data;
       else if (json.items) rawAssets = json.items;
       else if (json.result && Array.isArray(json.result)) rawAssets = json.result;
+      
+      // Si la API devuelve un objeto con claves numéricas (común en algunas versiones)
+      else if (typeof json === 'object' && json !== null) {
+          rawAssets = Object.values(json).filter(item => typeof item === 'object');
+      }
   
       return rawAssets.map(asset => ({
         id: asset.id || asset.uID || asset.vehiculo,
@@ -30,12 +41,11 @@ export const fetchGpsAssets = async () => {
       }));
   
     } catch (error) {
-      console.error("Error obteniendo vehículos GPS:", error);
+      console.error("❌ Error FATAL obteniendo vehículos GPS:", error);
       return [];
     }
   };
   
-  // 2. Obtener distancia
   export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
     try {
       const format = (d) => {
@@ -51,8 +61,12 @@ export const fetchGpsAssets = async () => {
       const fromStr = format(dateFrom);
       const toStr = format(dateTo);
       
-      // --- CAMBIO CRÍTICO: Ruta directa ---
-      const response = await fetch(`/.netlify/functions/cybermapa?endpoint=history&patente=${assetId}&from=${fromStr}&to=${toStr}`);
+      // Usamos la misma ruta /api/
+      const url = `/api/cybermapa?endpoint=history&patente=${assetId}&from=${fromStr}&to=${toStr}`;
+      
+      const response = await fetch(url);
+      if (!response.ok) return 0;
+  
       const json = await response.json();
       
       if (json.resumen && json.resumen.distancia) {
@@ -65,14 +79,12 @@ export const fetchGpsAssets = async () => {
     }
   };
   
-  // 3. Algoritmo de Mapeo
   export const matchFleetData = (csvData, gpsAssets) => {
     const matchedData = [];
     const csvSummary = {};
     let minDate = new Date();
     let maxDate = new Date(0);
   
-    // Agrupar CSV
     csvData.forEach(row => {
       if (!csvSummary[row.unidad]) {
         csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
@@ -85,29 +97,22 @@ export const fetchGpsAssets = async () => {
       if (rowDate > maxDate) maxDate = rowDate;
     });
   
-    // Cruzar datos
     Object.keys(csvSummary).forEach(unidadCsv => {
       const csvInfo = csvSummary[unidadCsv];
       
-      // Normalizar datos del CSV para comparar
-      const csvPlacaClean = (csvInfo.placa || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      const csvUnidadClean = unidadCsv.toString().toUpperCase().trim();
+      // Normalización fuerte para comparar
+      const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const csvPlaca = clean(csvInfo.placa);
+      const csvUnidad = clean(unidadCsv);
   
       const gpsAsset = gpsAssets.find(asset => {
-        // Normalizar datos del GPS
-        const gpsPlacaClean = (asset.plate || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        const gpsNameClean = (asset.name || '').toUpperCase();
+        const gpsPlaca = clean(asset.plate);
+        const gpsName = clean(asset.name);
   
-        // 1. Coincidencia FUERTE: Patente (si ambos tienen)
-        if (csvPlacaClean.length > 3 && gpsPlacaClean.length > 3) {
-            if (csvPlacaClean === gpsPlacaClean) return true;
-        }
-  
-        // 2. Coincidencia MEDIA: Nombre contiene Unidad (Ej: "MOVIL 25" contiene "25")
-        if (csvUnidadClean.length >= 2) {
-            // Buscamos "25" dentro de "MOVIL 25"
-            if (gpsNameClean.includes(csvUnidadClean)) return true;
-        }
+        // 1. Patente exacta
+        if (gpsPlaca && csvPlaca && gpsPlaca === csvPlaca) return true;
+        // 2. Nombre contiene unidad (Ej: "Movil25" contiene "25")
+        if (csvUnidad.length > 1 && gpsName.includes(csvUnidad)) return true;
         
         return false;
       });
