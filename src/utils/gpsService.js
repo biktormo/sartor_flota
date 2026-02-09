@@ -7,7 +7,7 @@ export const fetchGpsAssets = async () => {
     console.log("🚀 Intentando conectar a:", url); // <--- Nuevo log para depurar
   
     try {
-      const response = await fetch(url);
+      const response = await fetch('/api/cybermapa?endpoint=assets');
       
       // Si la redirección falla o la función no existe
       if (response.status === 404) {
