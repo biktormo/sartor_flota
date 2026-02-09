@@ -1,22 +1,17 @@
-// Usamos sintaxis ES Module (export const) para compatibilidad con tu package.json
-
 export const handler = async (event, context) => {
-  // URL descubierta en tu inspección de red
+  // URL exacta que descubrimos en la inspección
   const API_URL = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
 
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
   if (!USER || !PASS) {
-    return { 
-      statusCode: 500, 
-      body: JSON.stringify({ error: "Faltan credenciales en Netlify" }) 
-    };
+    return { statusCode: 500, body: JSON.stringify({ error: "Faltan credenciales" }) };
   }
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Estructura del payload basada en tu captura de red
+  // Payload Base
   let bodyPayload = {
     session: {
       user: USER,
@@ -28,21 +23,18 @@ export const handler = async (event, context) => {
     }
   };
 
-  // 1. Listado de Vehículos
+  // 1. INTENTO DE OBTENER ACTIVOS
+  // Usamos 'GETLASTDATA' que es el estándar para traer móviles. 
+  // Si esto falla, probaremos 'INITIALIZE' como plan B, pero primero necesitamos pasar el 403.
   if (endpoint === 'assets') {
-    // Usamos GETLASTDATA que es la función estándar en este tipo de backend (main.jss)
-    // para traer la lista de móviles.
-    bodyPayload.FUNC = 'GETLASTDATA'; 
+    bodyPayload.FUNC = 'GETLASTDATA';
     bodyPayload.paramsData = {};
   } 
-  // 2. Historial
   else if (endpoint === 'history') {
-    bodyPayload.FUNC = 'GETHISTORY'; // Nombre estándar para historial
+    bodyPayload.FUNC = 'GETHISTORY';
     bodyPayload.paramsData = {
-      // Ajustamos los parámetros. En main.jss suelen pedir IDs internos,
-      // pero probemos enviando la patente o ID que tengamos.
-      elementId: patente, // A veces es 'uID', 'id', 'elementId'
-      beginDate: from, 
+      elementId: patente,
+      beginDate: from,
       endDate: to,
     };
   }
@@ -52,14 +44,21 @@ export const handler = async (event, context) => {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        // Importante: Fingir ser el navegador
-        'Referer': 'https://gps.commers.com.ar/StreetZ/'
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        // --- LOS DISFRACES ---
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Origin': 'https://gps.commers.com.ar',
+        'Referer': 'https://gps.commers.com.ar/StreetZ/',
+        'X-Requested-With': 'XMLHttpRequest'
       },
       body: JSON.stringify(bodyPayload)
     });
 
+    // Si devuelve 403, devolvemos el texto del error para entender por qué
     if (!response.ok) {
-      return { statusCode: response.status, body: `Error Servidor GPS: ${response.statusText}` };
+      const text = await response.text();
+      console.log("Error API:", text);
+      return { statusCode: response.status, body: `Error Servidor GPS (${response.status}): ${text.substring(0, 200)}` };
     }
 
     const data = await response.json();

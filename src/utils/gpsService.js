@@ -1,50 +1,45 @@
 // src/utils/gpsService.js
 
 export const fetchGpsAssets = async () => {
-    // Usamos la ruta /api/ que configuramos en netlify.toml
-    const url = '/api/cybermapa?endpoint=assets';
+  try {
+    const response = await fetch('/api/cybermapa?endpoint=assets');
     
-    console.log("🚀 Intentando conectar a:", url); // <--- Nuevo log para depurar
-  
-    try {
-      const response = await fetch('/api/cybermapa?endpoint=assets');
-      
-      // Si la redirección falla o la función no existe
-      if (response.status === 404) {
-        throw new Error("Funciones no encontradas (404). Revisa el archivo netlify.toml");
-      }
-  
-      if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Error de red: ${response.status} - ${errorText}`);
-      }
-  
-      const json = await response.json();
-      console.log("📡 GPS ASSETS RECIBIDOS:", json);
-  
-      // Búsqueda flexible del array de datos
-      let rawAssets = [];
-      if (Array.isArray(json)) rawAssets = json;
-      else if (json.data) rawAssets = json.data;
-      else if (json.items) rawAssets = json.items;
-      else if (json.result && Array.isArray(json.result)) rawAssets = json.result;
-      
-      // Si la API devuelve un objeto con claves numéricas (común en algunas versiones)
-      else if (typeof json === 'object' && json !== null) {
-          rawAssets = Object.values(json).filter(item => typeof item === 'object');
-      }
-  
-      return rawAssets.map(asset => ({
-        id: asset.id || asset.uID || asset.vehiculo,
-        name: asset.alias || asset.nombre || asset.name || 'Sin Nombre',
-        plate: asset.patente || asset.placa || asset.plate || ''
-      }));
-  
-    } catch (error) {
-      console.error("❌ Error FATAL obteniendo vehículos GPS:", error);
-      return [];
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Error de red: ${response.status} - ${errorText}`);
     }
-  };
+
+    const json = await response.json();
+    console.log("📡 RESPUESTA API:", json);
+
+    // Búsqueda profunda de un array
+    let rawAssets = [];
+    
+    // Caso A: Array directo
+    if (Array.isArray(json)) rawAssets = json;
+    // Caso B: Propiedades comunes
+    else if (json.data && Array.isArray(json.data)) rawAssets = json.data;
+    else if (json.items) rawAssets = json.items;
+    else if (json.rows) rawAssets = json.rows;
+    // Caso C: Objeto indexado (común en Commers) -> { "101": {id...}, "102": {id...} }
+    else if (typeof json === 'object') {
+        // Buscamos valores que parezcan vehículos (tengan 'n' o 'name' o 'id')
+        rawAssets = Object.values(json).filter(item => item && (item.n || item.name || item.dsc || item.uID));
+    }
+
+    return rawAssets.map(asset => ({
+      // Mapeo de campos raros típicos de .jss
+      id: asset.uID || asset.id || asset.unitId,
+      name: asset.n || asset.name || asset.dsc || asset.alias || 'Sin Nombre',
+      // A veces la patente no viene, usamos el nombre como fallback
+      plate: asset.p || asset.plate || asset.n || '' 
+    }));
+
+  } catch (error) {
+    console.error("Error obteniendo vehículos GPS:", error);
+    return [];
+  }
+};
   
   export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
     try {
