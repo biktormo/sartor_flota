@@ -21,14 +21,17 @@ export const handler = async (event, context) => {
     }
   };
 
+  // --- CAMBIO AQUÍ: USAR GETLASTDATA ---
   if (endpoint === 'assets') {
-    bodyPayload.FUNC = 'INITIALIZE';
-    bodyPayload.paramsData = { auditReEntry: true };
+    bodyPayload.FUNC = 'GETLASTDATA'; 
+    bodyPayload.paramsData = {}; // Generalmente vacío trae todos
   } 
   else if (endpoint === 'history') {
     bodyPayload.FUNC = 'GETHISTORY'; 
     bodyPayload.paramsData = {
-      id: patente,
+      // Nota: Si GETLASTDATA funciona, veremos cuál es el nombre real del campo ID
+      // para usarlo aquí (puede ser 'uID', 'unitID', etc)
+      id: patente, 
       beginDate: from, 
       endDate: to,
     };
@@ -40,7 +43,6 @@ export const handler = async (event, context) => {
       headers: { 
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        // --- LÍNEA AÑADIDA AQUÍ ---
         'Referer': 'https://gps.commers.com.ar/StreetZ/'
       },
       body: JSON.stringify(bodyPayload)

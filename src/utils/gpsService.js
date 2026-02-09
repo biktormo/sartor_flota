@@ -1,51 +1,44 @@
 // src/utils/gpsService.js
 
-// 1. Obtener lista de vehículos de Cybermapa
 export const fetchGpsAssets = async () => {
     try {
-      // Llamamos a nuestra función de Netlify que actúa de puente
       const response = await fetch('/api/cybermapa?endpoint=assets');
-      
-      if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Error de red: ${response.status} - ${errorText}`);
-      }
-  
       const json = await response.json();
+      
+      console.log("📡 RESPUESTA CRUDA API (GETLASTDATA):", json);
   
-      // --- DEPURACIÓN CRÍTICA ---
-      // Esto imprimirá el objeto completo en la consola del navegador (F12)
-      console.log("📡 RESPUESTA CRUDA API (INITIALIZE):", json);
-      // --------------------------
+      // GETLASTDATA suele devolver un array directo o dentro de 'data'
+      // A veces se llama 'items' o 'rows'
+      const rawAssets = json.data || json.items || json || [];
   
-      // Intentamos encontrar el array de vehículos en las ubicaciones más comunes de esta plataforma
-      // La estructura suele ser json.data.units o json.data.view.units
-      const rawAssets = 
-          json.data?.units || 
-          json.data?.view?.units || 
-          json.units || 
-          json.devices || 
-          [];
-  
-      if (!Array.isArray(rawAssets) || rawAssets.length === 0) {
-          console.warn("⚠️ No se encontró el array de vehículos automáticamente. Revisa el objeto impreso arriba.");
+      if (!Array.isArray(rawAssets)) {
+          // Si no es un array, intentamos convertir objeto a array (a veces vienen indexados por ID)
+          if (typeof rawAssets === 'object') {
+              return Object.values(rawAssets).map(parseAsset);
+          }
+          console.warn("⚠️ No se encontró lista de vehículos.");
           return [];
       }
       
-      // Normalizamos los datos para que nuestra app los entienda
-      return rawAssets.map(asset => ({
-        // Buscamos el ID en varias propiedades posibles
-        id: asset.id || asset.uId || asset.unitId || asset.nId,
-        // Buscamos el nombre
-        name: asset.dsc || asset.name || asset.alias || asset.sName,
-        // Buscamos la patente (domain, plate, etc)
-        plate: asset.plate || asset.domain || asset.patente || ''
-      }));
+      return rawAssets.map(parseAsset);
   
     } catch (error) {
       console.error("Error obteniendo vehículos GPS:", error);
       return [];
     }
+  };
+  
+  // Función auxiliar para mapear campos raros
+  const parseAsset = (asset) => {
+      // Intentamos todas las variantes posibles de nombres de campos
+      return {
+          // ID: uID, id, unitId
+          id: asset.uID || asset.id || asset.unitID,
+          // Nombre: nm, dsc, name, alias
+          name: asset.nm || asset.dsc || asset.name || asset.alias || 'Sin Nombre',
+          // Patente: A veces está en 'msg' (mensaje), 'st' (subtítulo) o igual al nombre
+          plate: asset.plate || asset.domain || asset.nm || '' 
+      };
   };
   
   // 2. Obtener distancia recorrida en un rango de fechas
