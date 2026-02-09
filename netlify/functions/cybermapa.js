@@ -1,60 +1,68 @@
-// Usamos 'require' en lugar de 'import' (si usaras fetch nativo de Node 18 no hace falta importarlo, pero mantenemos la estructura simple)
+// Usamos sintaxis ES Module (export const) para compatibilidad con tu package.json
 
-exports.handler = async function(event, context) {
-  const API_URL = 'https://api.cybermapa.com/v1/json/';
-  
-  // LEER VARIABLES DE ENTORNO
+export const handler = async (event, context) => {
+  // URL descubierta en tu inspección de red
+  const API_URL = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
+
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
   if (!USER || !PASS) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Faltan credenciales en Netlify (Environment Variables)" })
+    return { 
+      statusCode: 500, 
+      body: JSON.stringify({ error: "Faltan credenciales en Netlify" }) 
     };
   }
 
-  // Obtener parámetros
-  const params = event.queryStringParameters || {};
-  const { endpoint, from, to, patente } = params;
+  const { endpoint, from, to, patente } = event.queryStringParameters;
 
+  // Estructura del payload basada en tu captura de red
   let bodyPayload = {
-    user: USER,
-    pwd: PASS
+    session: {
+      user: USER,
+      pwd: PASS,
+      lang: "es",
+      production: 1,
+      temporalInvitationModeEnabled: 0,
+      trackerModeEnabled: 0
+    }
   };
 
+  // 1. Listado de Vehículos
   if (endpoint === 'assets') {
-    bodyPayload.action = 'GETVEHICULOS';
+    // Usamos GETLASTDATA que es la función estándar en este tipo de backend (main.jss)
+    // para traer la lista de móviles.
+    bodyPayload.FUNC = 'GETLASTDATA'; 
+    bodyPayload.paramsData = {};
   } 
+  // 2. Historial
   else if (endpoint === 'history') {
-    bodyPayload.action = 'DATOSHISTORICOS';
-    bodyPayload.vehiculo = patente;
-    bodyPayload.tipoID = 'patente';
-    bodyPayload.desde = from;
-    bodyPayload.hasta = to;
+    bodyPayload.FUNC = 'GETHISTORY'; // Nombre estándar para historial
+    bodyPayload.paramsData = {
+      // Ajustamos los parámetros. En main.jss suelen pedir IDs internos,
+      // pero probemos enviando la patente o ID que tengamos.
+      elementId: patente, // A veces es 'uID', 'id', 'elementId'
+      beginDate: from, 
+      endDate: to,
+    };
   }
 
   try {
-    // Nota: Node.js 18+ soporta fetch nativo.
-    // Si tu Netlify usa una versión vieja, esto podría fallar, pero por defecto usa la moderna.
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        // Importante: Fingir ser el navegador
+        'Referer': 'https://gps.commers.com.ar/StreetZ/'
+      },
       body: JSON.stringify(bodyPayload)
     });
 
     if (!response.ok) {
-      return { statusCode: response.status, body: `Error HTTP: ${response.statusText}` };
+      return { statusCode: response.status, body: `Error Servidor GPS: ${response.statusText}` };
     }
 
-    const textData = await response.text();
-    let data;
-    try {
-        data = JSON.parse(textData);
-    } catch (e) {
-        // A veces devuelven HTML si hay error
-        return { statusCode: 502, body: JSON.stringify({ error: "Respuesta no válida del servidor GPS", raw: textData }) };
-    }
+    const data = await response.json();
 
     return {
       statusCode: 200,
@@ -63,9 +71,6 @@ exports.handler = async function(event, context) {
     };
 
   } catch (error) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.toString() })
-    };
+    return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
   }
 };
