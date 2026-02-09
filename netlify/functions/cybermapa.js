@@ -7,28 +7,34 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // --- ESTRUCTURA IDÉNTICA A TU CAPTURA DE PANTALLA ---
-  let bodyPayload = {
-    FUNC: "INITIALIZE", // Volvemos a probar con INITIALIZE para romper el 403
-    paramsData: { 
-        auditReEntry: true 
-    },
-    pr: "https:",
-    session: {
-      user: USER,
-      pwd: PASS,
-      lang: "es",
-      production: 1,
-      temporalInvitationModeEnabled: 0,
-      trackerModeEnabled: 0
-    }
+  // Estructura de sesión validada (La que funcionó en tu prueba)
+  const sessionData = {
+    user: USER,
+    pwd: PASS,
+    lang: "es",
+    production: 1,
+    temporalInvitationModeEnabled: 0,
+    trackerModeEnabled: 0
   };
 
-  // Si logramos conectar con INITIALIZE, luego nos preocupamos por GETHISTORY
-  if (endpoint === 'history') {
+  let bodyPayload = {
+    pr: "https:", // Agregado por seguridad, aparecía en tu captura
+    session: sessionData
+  };
+
+  // 1. OBTENER VEHÍCULOS
+  if (endpoint === 'assets') {
+    // CAMBIO CLAVE: Usamos GETLASTDATA para traer la flota
+    bodyPayload.FUNC = 'GETLASTDATA';
+    bodyPayload.paramsData = {}; 
+  } 
+  // 2. OBTENER HISTORIAL
+  else if (endpoint === 'history') {
     bodyPayload.FUNC = 'GETHISTORY';
     bodyPayload.paramsData = {
-        id: patente,
+        // A veces piden el ID, a veces la patente. Enviamos ambos por si acaso.
+        id: patente, 
+        elementId: patente,
         beginDate: from, 
         endDate: to
     };
@@ -39,6 +45,7 @@ export const handler = async (event, context) => {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
+        // Headers que validamos que funcionan
         'Referer': 'https://gps.commers.com.ar/StreetZ/',
         'Origin': 'https://gps.commers.com.ar',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -46,32 +53,21 @@ export const handler = async (event, context) => {
       body: JSON.stringify(bodyPayload)
     });
 
-    // Si sigue dando 403, mostramos el cuerpo para ver si dice algo útil
     if (!response.ok) {
       const text = await response.text();
-      console.log("Error 403 Body:", text);
-      return { statusCode: response.status, body: `Bloqueo Commers: ${text}` };
+      return { statusCode: response.status, body: `Error Servidor: ${text}` };
     }
 
     const data = await response.json();
-    console.log("LOGIN EXITOSO:", data);
-
-    // --- PARCHE ---
-    // Si pedimos 'assets', pero usamos INITIALIZE, la lista de autos
-    // estará muy escondida. La buscamos y la devolvemos limpia.
-    let finalData = data;
     
-    if (endpoint === 'assets') {
-        // En INITIALIZE la flota suele venir en data.units o data.view.units
-        const units = data.data?.units || data.data?.view?.units || [];
-        // Devolvemos solo lo que le interesa al frontend
-        finalData = units; 
-    }
-
+    // --- LIMPIEZA DE RESPUESTA ---
+    // GETLASTDATA suele devolver los vehículos dentro de 'data' o 'result'
+    // Devolvemos todo para que el frontend lo busque.
+    
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(finalData)
+      body: JSON.stringify(data)
     };
 
   } catch (error) {
