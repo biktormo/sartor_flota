@@ -22,6 +22,12 @@ const GpsComparisonPage = ({ data }) => {
     setLoading(true);
 
     try {
+        // INTENTO DE RECARGA SI NO HAY VEHÍCULOS
+      let currentAssets = gpsAssets;
+      if (currentAssets.length === 0) {
+          currentAssets = await fetchGpsAssets();
+          setGpsAssets(currentAssets);
+      }
       // A. Cruzar referencias
       const { matchedData, dateRange } = matchFleetData(data, gpsAssets);
 
@@ -60,8 +66,8 @@ const GpsComparisonPage = ({ data }) => {
         </div>
         <button 
           onClick={handleProcess} 
-          disabled={loading || gpsAssets.length === 0}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-sm disabled:opacity-50"
+          disabled={loading} // <--- QUITAMOS "|| gpsAssets.length === 0"
+          className={`bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-sm ${loading ? 'opacity-50' : ''}`}
         >
           {loading ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
           {loading ? 'Sincronizando GPS...' : 'Analizar Flota'}
