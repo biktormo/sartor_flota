@@ -1,9 +1,10 @@
 // src/utils/gpsService.js
 
-// 1. Obtener lista de vehículos de Cybermapa
+// 1. Obtener lista de vehículos
 export const fetchGpsAssets = async () => {
     try {
-      // --- CAMBIO 1: Ruta directa a Netlify Functions (evita problemas de redirección) ---
+      // --- CAMBIO CRÍTICO: Ruta directa a la función ---
+      // Usamos '/.netlify/functions/' en lugar de '/api/' para evitar errores de redirección
       const response = await fetch('/.netlify/functions/cybermapa?endpoint=assets');
       
       if (!response.ok) {
@@ -13,7 +14,6 @@ export const fetchGpsAssets = async () => {
   
       const json = await response.json();
       
-      // Log para depurar qué devuelve realmente
       console.log("📡 GPS ASSETS:", json);
   
       // Intentar encontrar el array en distintas estructuras posibles
@@ -51,7 +51,7 @@ export const fetchGpsAssets = async () => {
       const fromStr = format(dateFrom);
       const toStr = format(dateTo);
       
-      // --- CAMBIO 1: Ruta directa ---
+      // --- CAMBIO CRÍTICO: Ruta directa ---
       const response = await fetch(`/.netlify/functions/cybermapa?endpoint=history&patente=${assetId}&from=${fromStr}&to=${toStr}`);
       const json = await response.json();
       
@@ -65,7 +65,7 @@ export const fetchGpsAssets = async () => {
     }
   };
   
-  // 3. Algoritmo de Mapeo "Inteligente"
+  // 3. Algoritmo de Mapeo
   export const matchFleetData = (csvData, gpsAssets) => {
     const matchedData = [];
     const csvSummary = {};
@@ -104,14 +104,8 @@ export const fetchGpsAssets = async () => {
         }
   
         // 2. Coincidencia MEDIA: Nombre contiene Unidad (Ej: "MOVIL 25" contiene "25")
-        // Solo si la unidad del CSV no es algo genérico como "CAMION"
         if (csvUnidadClean.length >= 2) {
-            // Buscamos "25" dentro de "MOVIL 25 - SCANIA"
-            // Usamos bordes de palabra para no matchear "25" en "125"
-            const regex = new RegExp(`\\b${csvUnidadClean}\\b`);
-            if (regex.test(gpsNameClean)) return true;
-            
-            // Intento simple de inclusión
+            // Buscamos "25" dentro de "MOVIL 25"
             if (gpsNameClean.includes(csvUnidadClean)) return true;
         }
         
