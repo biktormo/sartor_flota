@@ -6,30 +6,39 @@ export const fetchGpsAssets = async () => {
     const response = await fetch('/api/cybermapa?endpoint=assets');
     const json = await response.json();
     
-    console.log("📡 DATOS RECIBIDOS (GPS):", json);
+    console.log("📡 GETLASTDATA RESULTADO:", json);
 
-    // --- CAMBIO CLAVE: Leer 'loginPositions' ---
-    // En la arquitectura 'main.jss', esta es la lista que viene con el login.
-    const rawAssets = json.loginPositions || [];
+    let rawAssets = [];
 
-    if (rawAssets.length === 0) {
-        console.warn("⚠️ La lista 'loginPositions' está vacía o no existe.");
+    // Estrategia de búsqueda para GETLASTDATA
+    // 1. Array directo en 'rows' o 'items'
+    if (json.rows && Array.isArray(json.rows)) rawAssets = json.rows;
+    else if (json.items && Array.isArray(json.items)) rawAssets = json.items;
+    else if (json.data && Array.isArray(json.data)) rawAssets = json.data;
+    
+    // 2. Objeto con IDs como claves (Muy común en Commers)
+    // Ej: { "25": { uID: 25, n: "Movil 25"... }, "30": { ... } }
+    else if (typeof json === 'object' && json !== null) {
+        // Filtramos solo los objetos que parezcan vehículos (tienen propiedad 'uID' o 'n')
+        rawAssets = Object.values(json).filter(val => 
+            val && typeof val === 'object' && (val.uID || val.id || val.n || val.dsc)
+        );
     }
 
-    return rawAssets.map(asset => {
-      // Mapeo de campos "minificados" típicos de StreetZ/Commers
-      // uID: ID único
-      // n: Nombre (Name)
-      // p: Patente (Plate) - A veces no viene y hay que usar el nombre
-      return {
-        id: asset.uID || asset.id,
-        name: asset.n || asset.name || asset.alias || 'Desconocido',
-        plate: asset.p || asset.plate || asset.n || '' // Si no hay patente, usamos el nombre como fallback
-      };
-    });
+    if (rawAssets.length === 0) {
+        console.warn("⚠️ No se encontraron vehículos en el JSON.");
+    }
+
+    return rawAssets.map(asset => ({
+      // Mapeo de campos típicos
+      id: asset.uID || asset.id || asset.unitID,
+      name: asset.n || asset.dsc || asset.name || asset.alias || 'Sin Nombre',
+      // Si no hay patente explícita (p, plate), usar el nombre
+      plate: asset.p || asset.plate || asset.n || '' 
+    }));
 
   } catch (error) {
-    console.error("Error obteniendo vehículos GPS:", error);
+    console.error("Error GPS:", error);
     return [];
   }
 };

@@ -7,67 +7,100 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Headers de "disfraz"
-  const headers = {
+  // Headers base para parecer un navegador real
+  const baseHeaders = {
     'Content-Type': 'application/json',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Referer': 'https://gps.commers.com.ar/StreetZ/',
     'Origin': 'https://gps.commers.com.ar'
   };
 
-  let bodyPayload = {};
+  const sessionData = {
+    user: USER,
+    pwd: PASS,
+    lang: "es",
+    production: 1,
+    temporalInvitationModeEnabled: 0,
+    trackerModeEnabled: 0
+  };
 
-  if (endpoint === 'assets') {
-    // INITIALIZE trae la configuración Y la última posición de los móviles (loginPositions)
-    // Es nuestra mejor opción porque no requiere cookie previa.
-    bodyPayload = {
+  try {
+    // --- PASO 1: LOGIN (INITIALIZE) ---
+    console.log("1. Iniciando sesión...");
+    const loginPayload = {
       FUNC: "INITIALIZE",
       paramsData: { auditReEntry: true },
       pr: "https:",
-      session: {
-        user: USER,
-        pwd: PASS,
-        lang: "es",
-        production: 1,
-        temporalInvitationModeEnabled: 0,
-        trackerModeEnabled: 0
-      }
+      session: sessionData
     };
-  } else if (endpoint === 'history') {
-    // Para historial probamos GETHISTORY. Si falla por cookie, no hay alternativa simple via API REST
-    // sin un proxy de cookies complejo. Pero intentemos.
-    bodyPayload = {
-      FUNC: "GETHISTORY",
-      paramsData: {
-        elementId: patente,
-        beginDate: from, 
-        endDate: to
-      },
-      session: { user: USER, pwd: PASS }
-    };
-  }
 
-  try {
-    const response = await fetch(API_URL, {
+    const loginRes = await fetch(API_URL, {
       method: 'POST',
-      headers: headers,
-      body: JSON.stringify(bodyPayload)
+      headers: baseHeaders,
+      body: JSON.stringify(loginPayload)
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return { statusCode: response.status, body: `Error Servidor: ${text}` };
+    if (!loginRes.ok) throw new Error(`Login falló: ${loginRes.status}`);
+
+    // EXTRACCIÓN DE COOKIES (CRÍTICO)
+    // Node.js 18+ soporta .getSetCookie(), si no, usamos .get('set-cookie')
+    let cookies = [];
+    if (typeof loginRes.headers.getSetCookie === 'function') {
+        cookies = loginRes.headers.getSetCookie();
+    } else {
+        const rawCookie = loginRes.headers.get('set-cookie');
+        if (rawCookie) cookies = [rawCookie];
+    }
+    
+    const cookieHeader = cookies.join('; '); // Unimos todas las cookies
+    console.log("2. Cookies obtenidas:", cookieHeader ? "SÍ" : "NO");
+
+    // --- PASO 2: PEDIR DATOS (GETLASTDATA / GETHISTORY) ---
+    let targetPayload = {
+      session: sessionData, // Reenviamos sesión por si acaso
+      pr: "https:"
+    };
+
+    if (endpoint === 'assets') {
+      // Esta función trae la lista de vehículos
+      targetPayload.FUNC = 'GETLASTDATA'; 
+      targetPayload.paramsData = {};
+    } 
+    else if (endpoint === 'history') {
+      targetPayload.FUNC = 'GETHISTORY';
+      targetPayload.paramsData = {
+          elementId: patente,
+          beginDate: from, 
+          endDate: to
+      };
     }
 
-    const data = await response.json();
+    const dataRes = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        ...baseHeaders,
+        'Cookie': cookieHeader // <--- AQUÍ ESTÁ LA CLAVE DEL ACCESO
+      },
+      body: JSON.stringify(targetPayload)
+    });
 
+    // Si falla el paso 2, devolvemos el error tal cual para verlo
+    if (!dataRes.ok) {
+      const errorTxt = await dataRes.text();
+      return { statusCode: dataRes.status, body: `Error Data: ${errorTxt}` };
+    }
+
+    const json = await dataRes.json();
+    
+    // Devolvemos el JSON final al frontend
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(data)
+      body: JSON.stringify(json)
     };
 
   } catch (error) {
+    console.error(error);
     return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
   }
 };
