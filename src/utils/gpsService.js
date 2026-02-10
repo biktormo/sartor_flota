@@ -3,40 +3,34 @@
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
-    
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Error de red: ${response.status} - ${errorText}`);
-    }
-
     const json = await response.json();
-    console.log("📡 RESPUESTA API:", json);
-
-    // Búsqueda profunda de un array
-    let rawAssets = [];
     
-    // Caso A: Array directo
-    if (Array.isArray(json)) rawAssets = json;
-    // Caso B: Propiedades comunes
-    else if (json.data && Array.isArray(json.data)) rawAssets = json.data;
-    else if (json.items) rawAssets = json.items;
-    else if (json.rows) rawAssets = json.rows;
-    // Caso C: Objeto indexado (común en Commers) -> { "101": {id...}, "102": {id...} }
-    else if (typeof json === 'object') {
-        // Buscamos valores que parezcan vehículos (tengan 'n' o 'name' o 'id')
-        rawAssets = Object.values(json).filter(item => item && (item.n || item.name || item.dsc || item.uID));
+    // --- ESTO ES LO QUE NECESITO VER ---
+    console.log("🔍 ESTRUCTURA COMPLETA:", JSON.stringify(json, null, 2)); 
+    // ----------------------------------
+
+    // Intentos desesperados de encontrar los datos
+    // A veces están en 'configuracionDinamica' o 'clientConfig'
+    let rawAssets = 
+        json.units || 
+        json.data?.units || 
+        json.configuracionDinamica?.units ||
+        json.clientConfig?.units ||
+        [];
+
+    // Si encontramos un objeto en lugar de array, lo convertimos
+    if (!Array.isArray(rawAssets) && typeof rawAssets === 'object') {
+        rawAssets = Object.values(rawAssets);
     }
 
     return rawAssets.map(asset => ({
-      // Mapeo de campos raros típicos de .jss
-      id: asset.uID || asset.id || asset.unitId,
-      name: asset.n || asset.name || asset.dsc || asset.alias || 'Sin Nombre',
-      // A veces la patente no viene, usamos el nombre como fallback
-      plate: asset.p || asset.plate || asset.n || '' 
+      id: asset.id || asset.uID,
+      name: asset.dsc || asset.n,
+      plate: asset.plate || asset.p || ''
     }));
 
   } catch (error) {
-    console.error("Error obteniendo vehículos GPS:", error);
+    console.error("Error GPS:", error);
     return [];
   }
 };

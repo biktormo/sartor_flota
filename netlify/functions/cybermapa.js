@@ -7,46 +7,29 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Estructura de sesión validada (La que funcionó en tu prueba)
-  // Veamos que sale
-  const sessionData = {
-    user: USER,
-    pwd: PASS,
-    lang: "es",
-    production: 1,
-    temporalInvitationModeEnabled: 0,
-    trackerModeEnabled: 0
-  };
-
+  // Usamos INITIALIZE porque es la única que sabemos que pasa el firewall sin cookies
   let bodyPayload = {
-    pr: "https:", // Agregado por seguridad, aparecía en tu captura
-    session: sessionData
+    FUNC: "INITIALIZE",
+    paramsData: { 
+        auditReEntry: true 
+    },
+    pr: "https:",
+    session: {
+      user: USER,
+      pwd: PASS,
+      lang: "es",
+      production: 1,
+      temporalInvitationModeEnabled: 0,
+      trackerModeEnabled: 0
+    }
   };
-
-  // 1. OBTENER VEHÍCULOS
-  if (endpoint === 'assets') {
-    // CAMBIO CLAVE: Usamos GETLASTDATA para traer la flota
-    bodyPayload.FUNC = 'GETLASTDATA';
-    bodyPayload.paramsData = {}; 
-  } 
-  // 2. OBTENER HISTORIAL
-  else if (endpoint === 'history') {
-    bodyPayload.FUNC = 'GETHISTORY';
-    bodyPayload.paramsData = {
-        // A veces piden el ID, a veces la patente. Enviamos ambos por si acaso.
-        id: patente, 
-        elementId: patente,
-        beginDate: from, 
-        endDate: to
-    };
-  }
 
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        // Headers que validamos que funcionan
+        // Estos headers son vitales para evitar el 403
         'Referer': 'https://gps.commers.com.ar/StreetZ/',
         'Origin': 'https://gps.commers.com.ar',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -60,11 +43,7 @@ export const handler = async (event, context) => {
     }
 
     const data = await response.json();
-    
-    // --- LIMPIEZA DE RESPUESTA ---
-    // GETLASTDATA suele devolver los vehículos dentro de 'data' o 'result'
-    // Devolvemos todo para que el frontend lo busque.
-    
+
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
