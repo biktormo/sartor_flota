@@ -1,6 +1,6 @@
 export const handler = async (event, context) => {
   // Según la documentación de Cybermapa/StreetZ, el endpoint API suele estar en /json/
-  const API_URL = 'https://gps.commers.com.ar/StreetZ/json/';
+  const API_URL = 'https://api.cybermapa.com/v1/json/';
 
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
