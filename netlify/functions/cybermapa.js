@@ -1,5 +1,7 @@
 export const handler = async (event, context) => {
-  const API_URL = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
+  // Según la documentación de Cybermapa/StreetZ, el endpoint API suele estar en /json/
+  const API_URL = 'https://gps.commers.com.ar/StreetZ/json/';
+
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
@@ -7,100 +9,56 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Headers base para parecer un navegador real
-  const baseHeaders = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://gps.commers.com.ar/StreetZ/',
-    'Origin': 'https://gps.commers.com.ar'
+  // 1. Construimos el Payload EXACTO de la documentación
+  let bodyPayload = {
+    user: USER,
+    pwd: PASS
   };
 
-  const sessionData = {
-    user: USER,
-    pwd: PASS,
-    lang: "es",
-    production: 1,
-    temporalInvitationModeEnabled: 0,
-    trackerModeEnabled: 0
-  };
+  if (endpoint === 'assets') {
+    // Según tu imagen: # GETVEHICULOS
+    bodyPayload.action = 'GETVEHICULOS';
+  } 
+  else if (endpoint === 'history') {
+    // Según tu imagen: Datos Historicos -> DATOSHISTORICOS
+    bodyPayload.action = 'DATOSHISTORICOS';
+    // Parámetros obligatorios según doc:
+    bodyPayload.vehiculo = patente; 
+    bodyPayload.desde = from;
+    bodyPayload.hasta = to;
+    // Opcionales útiles:
+    bodyPayload.tipoID = 'patente'; 
+  }
 
   try {
-    // --- PASO 1: LOGIN (INITIALIZE) ---
-    console.log("1. Iniciando sesión...");
-    const loginPayload = {
-      FUNC: "INITIALIZE",
-      paramsData: { auditReEntry: true },
-      pr: "https:",
-      session: sessionData
-    };
-
-    const loginRes = await fetch(API_URL, {
+    const response = await fetch(API_URL, {
       method: 'POST',
-      headers: baseHeaders,
-      body: JSON.stringify(loginPayload)
-    });
-
-    if (!loginRes.ok) throw new Error(`Login falló: ${loginRes.status}`);
-
-    // EXTRACCIÓN DE COOKIES (CRÍTICO)
-    // Node.js 18+ soporta .getSetCookie(), si no, usamos .get('set-cookie')
-    let cookies = [];
-    if (typeof loginRes.headers.getSetCookie === 'function') {
-        cookies = loginRes.headers.getSetCookie();
-    } else {
-        const rawCookie = loginRes.headers.get('set-cookie');
-        if (rawCookie) cookies = [rawCookie];
-    }
-    
-    const cookieHeader = cookies.join('; '); // Unimos todas las cookies
-    console.log("2. Cookies obtenidas:", cookieHeader ? "SÍ" : "NO");
-
-    // --- PASO 2: PEDIR DATOS (GETLASTDATA / GETHISTORY) ---
-    let targetPayload = {
-      session: sessionData, // Reenviamos sesión por si acaso
-      pr: "https:"
-    };
-
-    if (endpoint === 'assets') {
-      // Esta función trae la lista de vehículos
-      targetPayload.FUNC = 'GETLASTDATA'; 
-      targetPayload.paramsData = {};
-    } 
-    else if (endpoint === 'history') {
-      targetPayload.FUNC = 'GETHISTORY';
-      targetPayload.paramsData = {
-          elementId: patente,
-          beginDate: from, 
-          endDate: to
-      };
-    }
-
-    const dataRes = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        ...baseHeaders,
-        'Cookie': cookieHeader // <--- AQUÍ ESTÁ LA CLAVE DEL ACCESO
+      headers: { 
+        'Content-Type': 'application/json'
+        // No enviamos cookies ni referer, la API documental no debería pedirlos
       },
-      body: JSON.stringify(targetPayload)
+      body: JSON.stringify(bodyPayload)
     });
 
-    // Si falla el paso 2, devolvemos el error tal cual para verlo
-    if (!dataRes.ok) {
-      const errorTxt = await dataRes.text();
-      return { statusCode: dataRes.status, body: `Error Data: ${errorTxt}` };
+    // Si la URL /json/ da 404, devolveremos un mensaje claro para probar otra URL
+    if (response.status === 404) {
+        return { statusCode: 404, body: "La URL de la API (/json/) no existe en este servidor." };
     }
 
-    const json = await dataRes.json();
-    
-    // Devolvemos el JSON final al frontend
+    if (!response.ok) {
+      const text = await response.text();
+      return { statusCode: response.status, body: `Error API: ${text}` };
+    }
+
+    const data = await response.json();
+
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(json)
+      body: JSON.stringify(data)
     };
 
   } catch (error) {
-    console.error(error);
     return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
   }
 };
