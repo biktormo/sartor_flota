@@ -7,13 +7,8 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Usamos INITIALIZE porque es la única que sabemos que pasa el firewall sin cookies
+  // Estructura de sesión (Misma que funcionó en INITIALIZE)
   let bodyPayload = {
-    FUNC: "INITIALIZE",
-    paramsData: { 
-        auditReEntry: true 
-    },
-    pr: "https:",
     session: {
       user: USER,
       pwd: PASS,
@@ -21,15 +16,31 @@ export const handler = async (event, context) => {
       production: 1,
       temporalInvitationModeEnabled: 0,
       trackerModeEnabled: 0
-    }
+    },
+    pr: "https:"
   };
+
+  // --- SOLICITUD DE DATOS REALES ---
+  if (endpoint === 'assets') {
+    // GETLASTDATA es la función que trae la lista y posición de los móviles
+    bodyPayload.FUNC = 'GETLASTDATA';
+    bodyPayload.paramsData = {}; 
+  } 
+  else if (endpoint === 'history') {
+    bodyPayload.FUNC = 'GETHISTORY'; 
+    bodyPayload.paramsData = {
+        elementId: patente,
+        beginDate: from, 
+        endDate: to
+    };
+  }
 
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        // Estos headers son vitales para evitar el 403
+        // ESTOS HEADERS SON LA CLAVE DEL ÉXITO
         'Referer': 'https://gps.commers.com.ar/StreetZ/',
         'Origin': 'https://gps.commers.com.ar',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
