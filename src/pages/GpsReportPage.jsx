@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline } from 'react-leaflet';
 import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
 import { fetchGpsAssets, fetchGpsHistory } from '../utils/gpsService';
-import { Route, TrendingUp, Loader2, PlayCircle, BarChart, Map as MapIcon, Calendar, Car } from 'lucide-react';
+import { Route, Loader2, PlayCircle, BarChart, Map as MapIcon, Calendar } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
-// Configuración básica para el mapa de calor
 const heatmapOptions = {
   radius: 20,
   blur: 20,
@@ -14,7 +13,8 @@ const heatmapOptions = {
 
 const GpsReportPage = () => {
   const [vehicles, setVehicles] = useState([]);
-  const [selectedVehicle, setSelectedVehicle] = useState('');
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  // Fechas por defecto: Hoy y hace 7 días
   const [dateRange, setDateRange] = useState({
     from: new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0],
     to: new Date().toISOString().split('T')[0]
@@ -23,7 +23,7 @@ const GpsReportPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Cargar lista de vehículos GPS al inicio
+  // Cargar lista al inicio
   useEffect(() => {
     const loadAssets = async () => {
       const assets = await fetchGpsAssets();
@@ -33,7 +33,7 @@ const GpsReportPage = () => {
   }, []);
 
   const handleGenerateReport = async () => {
-    if (!selectedVehicle) {
+    if (!selectedVehicleId) {
       setError('Por favor, selecciona un vehículo.');
       return;
     }
@@ -41,22 +41,33 @@ const GpsReportPage = () => {
     setError('');
     setReportData(null);
 
-    const vehicle = vehicles.find(v => v.id === selectedVehicle);
+    // Buscar el objeto vehículo completo usando el ID seleccionado
+    const vehicle = vehicles.find(v => String(v.id) === String(selectedVehicleId));
+    
     if (!vehicle) {
-        setError('Vehículo no encontrado.');
+        setError('Error interno: Vehículo no encontrado en la lista.');
         setLoading(false);
         return;
     }
 
     try {
+      // Usamos la patente si está disponible, sino el ID, tal como pide la API
+      const searchKey = vehicle.plate || vehicle.id;
+      
       const data = await fetchGpsHistory(
-        vehicle.plate || vehicle.id, // Usamos patente o ID
+        searchKey,
         new Date(dateRange.from),
         new Date(dateRange.to)
       );
-      setReportData(data);
+      
+      if (data.routePoints.length === 0 && data.totalDistance === 0) {
+          setError("No se encontraron datos de recorrido para este período.");
+      } else {
+          setReportData(data);
+      }
     } catch (err) {
-      setError('No se pudo generar el reporte. Intenta más tarde.');
+      setError('No se pudo generar el reporte. Verifica la conexión.');
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -77,30 +88,39 @@ const GpsReportPage = () => {
         <div className="flex items-end gap-3 flex-wrap">
           <div className="flex flex-col">
             <label className="text-xs font-semibold text-gray-500 mb-1 ml-1">Vehículo</label>
-            <select value={selectedVehicle} onChange={e => setSelectedVehicle(e.target.value)} className="w-48 border-gray-300 rounded-md text-sm focus:ring-jd-green shadow-sm">
-              <option value="">-- Todos --</option>
-              {vehicles.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            <select 
+                value={selectedVehicleId} 
+                onChange={e => setSelectedVehicleId(e.target.value)} 
+                className="w-64 border-gray-300 rounded-md text-sm focus:ring-jd-green shadow-sm cursor-pointer"
+            >
+              <option value="">-- Seleccionar --</option>
+              {vehicles.map(v => (
+                <option key={v.id} value={v.id}>
+                    {v.name} {v.plate ? `(${v.plate})` : ''}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex flex-col">
-            <label className="text-xs font-semibold text-gray-500 mb-1 ml-1">Desde</label>
-            <input type="date" value={dateRange.from} onChange={e => setDateRange(p => ({...p, from: e.target.value}))} className="border-gray-300 rounded-md text-sm focus:ring-jd-green shadow-sm" />
+            <label className="text-xs font-semibold text-gray-500 mb-1 ml-1 flex items-center gap-1"><Calendar size={12}/> Desde</label>
+            <input type="date" value={dateRange.from} onChange={e => setDateRange(p => ({...p, from: e.target.value}))} className="border-gray-300 rounded-md text-sm focus:ring-jd-green shadow-sm cursor-pointer" />
           </div>
           <div className="flex flex-col">
-            <label className="text-xs font-semibold text-gray-500 mb-1 ml-1">Hasta</label>
-            <input type="date" value={dateRange.to} onChange={e => setDateRange(p => ({...p, to: e.target.value}))} className="border-gray-300 rounded-md text-sm focus:ring-jd-green shadow-sm" />
+            <label className="text-xs font-semibold text-gray-500 mb-1 ml-1 flex items-center gap-1"><Calendar size={12}/> Hasta</label>
+            <input type="date" value={dateRange.to} onChange={e => setDateRange(p => ({...p, to: e.target.value}))} className="border-gray-300 rounded-md text-sm focus:ring-jd-green shadow-sm cursor-pointer" />
           </div>
           <button onClick={handleGenerateReport} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-sm disabled:opacity-50">
             {loading ? <Loader2 className="animate-spin" size={18} /> : <PlayCircle size={18} />}
-            Generar Reporte
+            Generar
           </button>
         </div>
       </div>
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-      
-      {/* RESULTADOS */}
-      {loading && <p className="text-center text-gray-500 py-10">Cargando historial...</p>}
+      {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {error}
+          </div>
+      )}
       
       {reportData && (
         <div className="animate-in fade-in duration-500 space-y-6">
@@ -115,21 +135,31 @@ const GpsReportPage = () => {
             {/* MAPA DE RUTA */}
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-[500px] flex flex-col">
               <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><MapIcon size={20}/> Ruta Realizada</h3>
-              <div className="flex-1 rounded-lg overflow-hidden border border-gray-200">
-                <MapContainer center={[-27.21, -61.21]} zoom={8} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <div className="flex-1 rounded-lg overflow-hidden border border-gray-100 relative z-0">
+                {/* Centramos el mapa en el primer punto de la ruta si existe, sino default */}
+                <MapContainer 
+                    center={reportData.routePoints.length > 0 ? reportData.routePoints[0] : [-27.21, -61.21]} 
+                    zoom={reportData.routePoints.length > 0 ? 10 : 6} 
+                    style={{ height: '100%', width: '100%' }}
+                >
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
                   {reportData.routePoints.length > 0 && (
-                    <Polyline pathOptions={{ color: 'blue', weight: 3 }} positions={reportData.routePoints} />
+                    <Polyline pathOptions={{ color: 'blue', weight: 4, opacity: 0.7 }} positions={reportData.routePoints} />
                   )}
                 </MapContainer>
               </div>
             </div>
+
             {/* MAPA DE CALOR */}
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-[500px] flex flex-col">
               <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><BarChart size={20}/> Zonas de Mayor Actividad</h3>
-              <div className="flex-1 rounded-lg overflow-hidden border border-gray-200">
-                 <MapContainer center={[-27.21, -61.21]} zoom={8} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <div className="flex-1 rounded-lg overflow-hidden border border-gray-100 relative z-0">
+                 <MapContainer 
+                    center={reportData.routePoints.length > 0 ? reportData.routePoints[0] : [-27.21, -61.21]} 
+                    zoom={reportData.routePoints.length > 0 ? 10 : 6} 
+                    style={{ height: '100%', width: '100%' }}
+                 >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
                     {reportData.heatPoints.length > 0 && (
                        <HeatmapLayer
                           points={reportData.heatPoints}
