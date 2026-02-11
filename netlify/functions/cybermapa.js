@@ -1,3 +1,5 @@
+// Usamos sintaxis ES Module (export const) para que sea compatible con tu package.json
+
 export const handler = async (event, context) => {
   const API_URL = 'https://gps.commers.com.ar/API/WService.js';
 
@@ -5,19 +7,21 @@ export const handler = async (event, context) => {
   const PASS = process.env.CYBERMAPA_PASS;
 
   if (!USER || !PASS) {
-    return { statusCode: 500, body: JSON.stringify({ error: "Faltan credenciales" }) };
+    return { statusCode: 500, body: JSON.stringify({ error: "Faltan credenciales en Netlify" }) };
   }
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
+  // Payload base
   let bodyPayload = {
     user: USER,
     pwd: PASS
   };
 
-  if (endpoint === === 'assets') {
-    // --- CAMBIO AQUÍ: Probamos con la otra función de la doc ---
-    bodyPayload.action = 'LISTAUNIDADES';
+  // Usamos la acción que nos devolvió el error "Función Desconocida"
+  // Si GETVEHICULOS dio error, volvemos a intentar con LISTAUNIDADES.
+  if (endpoint === 'assets') {
+    bodyPayload.action = 'LISTAUNIDADES'; 
   } 
   else if (endpoint === 'history') {
     bodyPayload.action = 'DATOSHISTORICOS';
@@ -30,9 +34,7 @@ export const handler = async (event, context) => {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bodyPayload)
     });
 
