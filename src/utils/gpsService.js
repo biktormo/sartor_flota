@@ -1,3 +1,5 @@
+// src/utils/gpsService.js
+
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
@@ -5,31 +7,25 @@ export const fetchGpsAssets = async () => {
     
     console.log("📡 API GETVEHICULOS:", json);
 
-    // La documentación mostraba un Array directo de objetos
-    let rawAssets = [];
-    
-    if (Array.isArray(json)) {
-        rawAssets = json;
-    } else if (json.data && Array.isArray(json.data)) {
-        rawAssets = json.data;
-    } else if (json.result) {
-        // A veces devuelven { result: [...] }
-        rawAssets = Array.isArray(json.result) ? json.result : [];
+    // --- CORRECCIÓN FINAL: Leer 'unidades' ---
+    const rawAssets = json.unidades || [];
+
+    if (!Array.isArray(rawAssets) || rawAssets.length === 0) {
+        console.warn("⚠️ No se encontraron vehículos en la propiedad 'unidades'.");
+        return [];
     }
 
-    if (rawAssets.length === 0) {
-        console.warn("⚠️ Lista vacía. Revisa la consola.");
-    }
-
-    return rawAssets.map(asset => ({
-      // Mapeo según documentación oficial:
-      id: asset.id_gps || asset.id, 
-      name: asset.alias || asset.descripcion || asset.nombre || 'Sin Nombre',
-      plate: asset.patente || asset.plate || '' 
-    }));
+    return rawAssets.map(asset => {
+      // Mapeo según los campos que vemos en la consola:
+      return {
+        id: asset.id_gps, // <-- El ID único parece ser 'id_gps'
+        name: asset.alias, // <-- El nombre es 'alias' ("MOVIL 44 - AE822VW")
+        plate: asset.patente // <-- La patente es 'patente'
+      };
+    });
 
   } catch (error) {
-    console.error("Error GPS:", error);
+    console.error("Error procesando flota GPS:", error);
     return [];
   }
 };
