@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
-import HeatmapLayer from 'react-leaflet-heatmap-layer-v3';
+import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
 import { fetchGpsAssets, fetchGpsHistory } from '../utils/gpsService';
 import { Route, TrendingUp, Loader2, PlayCircle, BarChart, Map as MapIcon, Calendar, Car } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
