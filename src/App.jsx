@@ -11,6 +11,7 @@ import { fetchDashboardData, uploadFleetData, deleteFileAndRecords } from './uti
 import { calculateKPIs } from './utils/dataProcessor';
 import GapsPage from './pages/GapsPage';
 import GpsComparisonPage from './pages/GpsComparisonPage';
+import GpsReportPage from './pages/GpsReportPage';
 
 function App() {
   const [fleetData, setFleetData] = useState([]);
@@ -86,6 +87,7 @@ function App() {
               <Route path="*" element={<div className="p-10 text-center text-gray-500">Página en construcción</div>} />
               <Route path="/gaps" element={<GapsPage data={fleetData} />} />
               <Route path="/gps-check" element={<GpsComparisonPage data={fleetData} />} />
+              <Route path="/gps-reports" element={<GpsReportPage />} />
             </Routes>
           </main>
         </div>

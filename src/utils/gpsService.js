@@ -117,3 +117,66 @@ export const matchFleetData = (csvData, gpsAssets) => {
 
   return { matchedData, dateRange: { min: minDate, max: maxDate } };
 };
+
+// --- NUEVA FUNCIÓN: Obtener el historial completo ---
+export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
+  try {
+    const format = (d) => {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = '00';
+        const min = '00';
+        const ss = '00';
+        return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+    };
+    
+    // Tomamos desde el inicio del día hasta el final del día
+    const fromStr = format(dateFrom);
+    const toDateEnd = new Date(dateTo);
+    toDateEnd.setHours(23, 59, 59); // Asegurar que cubra todo el día
+    const toStr = format(toDateEnd);
+    
+    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
+    const json = await response.json();
+    
+    console.log(`📡 Historial para ${patente}:`, json);
+
+    // Procesamos la respuesta para devolver un objeto útil
+    let totalDistance = 0;
+    let routePoints = [];
+    
+    // Caso 1: La API devuelve un resumen con la distancia total
+    if (json.resumen && json.resumen.distancia) {
+      totalDistance = parseFloat(json.resumen.distancia);
+    }
+
+    // Caso 2: La API devuelve un array de puntos (el más común)
+    const dataPoints = json.datos || json.filas || (Array.isArray(json) ? json : []);
+    
+    if (dataPoints.length > 0) {
+      // Si el resumen no trajo distancia, la calculamos del último punto
+      if (totalDistance === 0) {
+        const lastPoint = dataPoints[dataPoints.length - 1];
+        if (lastPoint.distancia_acumulada) {
+            totalDistance = parseFloat(lastPoint.distancia_acumulada);
+        }
+      }
+      
+      // Extraemos las coordenadas para dibujar la ruta
+      routePoints = dataPoints
+        .filter(p => p.lat && p.lon) // Filtrar puntos sin coordenadas
+        .map(p => [parseFloat(p.lat), parseFloat(p.lon)]);
+    }
+
+    return {
+      totalDistance,
+      routePoints, // Array de [lat, lng] para la línea de ruta
+      heatPoints: routePoints.map(p => [p[0], p[1], 1]), // Array de [lat, lng, intensidad] para el mapa de calor
+    };
+
+  } catch (error) {
+    console.error(`Error obteniendo historial para ${patente}:`, error);
+    return { totalDistance: 0, routePoints: [], heatPoints: [] };
+  }
+};

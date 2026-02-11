@@ -5,6 +5,7 @@ import {
   FileText, Settings, LogOut, Upload, X, Download, Satellite 
 } from 'lucide-react';
 import { FileSearch } from 'lucide-react';
+import { Route as RouteIcon } from 'lucide-react'; // <--- Usamos un alias para no chocar con el Route de react-router
 
 const Sidebar = ({ isOpen, onClose }) => {
   const linkClass = ({ isActive }) =>
@@ -66,6 +67,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             <NavLink to="/reports" className={linkClass}><FileText size={18} /> Reportes</NavLink>
             <NavLink to="/settings" className={linkClass}><Settings size={18} /> Configuración</NavLink>
             <NavLink to="/gaps" className={linkClass}><FileSearch size={18} /> Auditoría / Diferencias</NavLink>
+            <NavLink to="/gps-reports" className={linkClass}><RouteIcon size={18} /> Análisis GPS</NavLink>
           </div>
         </nav>
 
