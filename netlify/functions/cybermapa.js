@@ -1,5 +1,4 @@
 export const handler = async (event, context) => {
-  // --- NUEVA URL PROVISTA ---
   const API_URL = 'https://gps.commers.com.ar/API/WService.js';
 
   const USER = process.env.CYBERMAPA_USER;
@@ -11,14 +10,14 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Payload base según documentación oficial
   let bodyPayload = {
     user: USER,
     pwd: PASS
   };
 
-  if (endpoint === 'assets') {
-    bodyPayload.action = 'GETVEHICULOS';
+  if (endpoint === === 'assets') {
+    // --- CAMBIO AQUÍ: Probamos con la otra función de la doc ---
+    bodyPayload.action = 'LISTAUNIDADES';
   } 
   else if (endpoint === 'history') {
     bodyPayload.action = 'DATOSHISTORICOS';
@@ -37,7 +36,6 @@ export const handler = async (event, context) => {
       body: JSON.stringify(bodyPayload)
     });
 
-    // Si el servidor devuelve error HTTP (404, 500)
     if (!response.ok) {
       const text = await response.text();
       return { statusCode: response.status, body: `Error Servidor: ${text}` };
