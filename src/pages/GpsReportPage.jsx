@@ -51,14 +51,15 @@ const GpsReportPage = () => {
     }
 
     try {
-      // Usamos la patente si está disponible, sino el ID, tal como pide la API
-      const searchKey = vehicle.plate || vehicle.id;
-      
-      const data = await fetchGpsHistory(
-        searchKey,
-        new Date(dateRange.from),
-        new Date(dateRange.to)
-      );
+        // --- CAMBIO: Usamos vehicle.id (el número largo 8652...) ---
+        // En gpsService.js ya mapeamos 'gps' -> 'id'
+        const searchKey = vehicle.id; 
+        
+        const data = await fetchGpsHistory(
+          searchKey,
+          new Date(dateRange.from),
+          new Date(dateRange.to)
+        );
       
       if (data.routePoints.length === 0 && data.totalDistance === 0) {
           setError("No se encontraron datos de recorrido para este período.");

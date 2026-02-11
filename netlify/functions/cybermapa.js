@@ -1,40 +1,53 @@
-// Usamos sintaxis ES Module (export const) para que sea compatible con tu package.json
-
 export const handler = async (event, context) => {
-  const API_URL = 'https://gps.commers.com.ar/API/WService.js';
-
+  const API_URL = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
-  if (!USER || !PASS) {
-    return { statusCode: 500, body: JSON.stringify({ error: "Faltan credenciales en Netlify" }) };
-  }
+  if (!USER || !PASS) return { statusCode: 500, body: "Faltan credenciales" };
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Payload base
+  // Estructura de sesión
   let bodyPayload = {
-    user: USER,
-    pwd: PASS
+    session: {
+      user: USER,
+      pwd: PASS,
+      lang: "es",
+      production: 1,
+      temporalInvitationModeEnabled: 0,
+      trackerModeEnabled: 0
+    },
+    pr: "https:"
   };
 
-  // Usamos la acción que nos devolvió el error "Función Desconocida"
-  // Si GETVEHICULOS dio error, volvemos a intentar con LISTAUNIDADES.
   if (endpoint === 'assets') {
-    bodyPayload.action = 'LISTAUNIDADES'; 
+    // ESTO YA FUNCIONA (Trae la lista via loginPositions)
+    bodyPayload.FUNC = 'INITIALIZE';
+    bodyPayload.paramsData = { auditReEntry: true };
   } 
   else if (endpoint === 'history') {
-    bodyPayload.action = 'DATOSHISTORICOS';
-    bodyPayload.vehiculo = patente;
-    bodyPayload.tipoID = 'patente';
-    bodyPayload.desde = from;
-    bodyPayload.hasta = to;
+    // --- CORRECCIÓN AQUÍ ---
+    // Usamos el nombre exacto de la documentación
+    bodyPayload.FUNC = 'DATOSHISTORICOS';
+    
+    // Parámetros en español según doc
+    bodyPayload.paramsData = {
+      vehiculo: patente, // Aquí llegará el ID numérico largo (gps)
+      tipoID: 'gps',     // Especificamos que enviamos el ID de GPS
+      desde: from,       // YYYY-MM-DD HH:MM:SS
+      hasta: to
+    };
   }
 
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Referer': 'https://gps.commers.com.ar/StreetZ/',
+        'Origin': 'https://gps.commers.com.ar',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
       body: JSON.stringify(bodyPayload)
     });
 

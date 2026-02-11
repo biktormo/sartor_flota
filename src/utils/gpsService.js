@@ -51,49 +51,55 @@ export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
 };
 
 // 3. Obtener Historial COMPLETO (Para la página Análisis GPS con Mapas)
-export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
+export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
   try {
+    // Formato exacto requerido: "yyyy-mm-dd hh:mm:ss"
     const format = (d) => {
         const pad = (n) => n.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
     
+    // Rango completo
     const fromDate = new Date(dateFrom); fromDate.setHours(0,0,0);
     const toDate = new Date(dateTo); toDate.setHours(23,59,59);
 
     const fromStr = format(fromDate);
     const toStr = format(toDate);
     
-    console.log(`📡 Pidiendo Historial Detallado: ${patente}`);
+    console.log(`📡 Solicitando historial ID: ${assetId}`);
 
-    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
+    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${assetId}&from=${fromStr}&to=${toStr}`);
     const json = await response.json();
     
     console.log("📡 HISTORIAL RECIBIDO:", json);
 
     let totalDistance = 0;
     let routePoints = [];
-    
-    // Distancia
+
+    // --- PARSEO DE RESPUESTA DATOSHISTORICOS ---
+    // 1. Distancia en resumen
     if (json.resumen && json.resumen.distancia) {
       totalDistance = parseFloat(json.resumen.distancia);
     }
 
-    // Puntos
-    const dataPoints = json.filas || json.datos || (Array.isArray(json) ? json : []);
+    // 2. Puntos del recorrido
+    // La API suele devolver: { result: [ {lat, lon, ...} ] } o { datos: [...] }
+    const dataPoints = json.result || json.datos || json.filas || (Array.isArray(json) ? json : []);
     
     if (dataPoints.length > 0) {
+      // Calcular distancia si no vino en resumen
       if (totalDistance === 0) {
-        const last = dataPoints[dataPoints.length - 1];
-        if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
-        else if (last.distancia) totalDistance = parseFloat(last.distancia);
+         // Sumar tramos o tomar último acumulado
+         const last = dataPoints[dataPoints.length-1];
+         if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
       }
-      
+
+      // Mapear coordenadas
       routePoints = dataPoints
-        .filter(p => (p.lat && p.lon) || (p.latitud && p.longitud))
+        .filter(p => (p.lat && p.lon) || (p.y && p.x)) // A veces usan y/x
         .map(p => {
-            const lat = parseFloat(p.lat || p.latitud);
-            const lng = parseFloat(p.lon || p.longitud || p.lng);
+            const lat = parseFloat(p.lat || p.y);
+            const lng = parseFloat(p.lon || p.x);
             return [lat, lng];
         });
     }
@@ -105,7 +111,7 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
     };
 
   } catch (error) {
-    console.error(`Error obteniendo historial:`, error);
+    console.error(`Error historial:`, error);
     return { totalDistance: 0, routePoints: [], heatPoints: [] };
   }
 };
