@@ -4,23 +4,46 @@
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
-    const json = await response.json();
     
-    console.log("📡 API GETVEHICULOS (RAW):", json);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Error de red: ${response.status} - ${errorText}`);
+    }
 
-    // Búsqueda flexible (unidades, datos, rows)
-    const rawAssets = json.unidades || json.datos || (Array.isArray(json) ? json : []);
+    const json = await response.json();
+    console.log("📡 DATOS DE FLOTA (GETLASTDATA):", json);
 
-    if (rawAssets.length === 0) console.warn("⚠️ Lista vacía.");
+    let rawAssets = [];
 
+    // Estrategia de búsqueda para la respuesta de GETLASTDATA
+    // 1. Propiedades comunes: 'data', 'rows', 'items'
+    if (json.data && Array.isArray(json.data)) rawAssets = json.data;
+    else if (json.rows && Array.isArray(json.rows)) rawAssets = json.rows;
+    else if (json.items && Array.isArray(json.items)) rawAssets = json.items;
+    
+    // 2. Si es un objeto de objetos (ej: {"1":{...}, "2":{...}})
+    else if (typeof json === 'object' && !Array.isArray(json)) {
+        rawAssets = Object.values(json).filter(item => item && (item.uID || item.n));
+    }
+    
+    // 3. Si es un array directo
+    else if (Array.isArray(json)) {
+        rawAssets = json;
+    }
+
+    if (rawAssets.length === 0) {
+        console.warn("⚠️ Lista vacía. Revisa la estructura del JSON en la consola.");
+    }
+
+    // Mapeo flexible de campos
     return rawAssets.map(asset => ({
-      id: asset.gps || asset.id,
-      name: asset.alias || asset.patente || asset.name,
-      plate: asset.patente || ''
-    }));
+      id: asset.uID || asset.id,
+      name: asset.n || asset.name || asset.alias || 'Sin Nombre',
+      plate: asset.p || asset.plate || asset.n || ''
+    })).filter(v => v.id); // Asegurar que todos tengan un ID
 
   } catch (error) {
-    console.error("Error GPS Assets:", error);
+    console.error("Error procesando flota GPS:", error);
     return [];
   }
 };

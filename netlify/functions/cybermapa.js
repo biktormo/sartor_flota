@@ -7,64 +7,87 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Estructura de sesión
-  let bodyPayload = {
-    session: {
-      user: USER,
-      pwd: PASS,
-      lang: "es",
-      production: 1,
-      temporalInvitationModeEnabled: 0,
-      trackerModeEnabled: 0
-    },
-    pr: "https:"
+  // Headers base que simulan ser un navegador
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://gps.commers.com.ar/StreetZ/',
+    'Origin': 'https://gps.commers.com.ar'
   };
 
-  if (endpoint === 'assets') {
-    // ESTO YA FUNCIONA (Trae la lista via loginPositions)
-    bodyPayload.FUNC = 'INITIALIZE';
-    bodyPayload.paramsData = { auditReEntry: true };
-  } 
-  else if (endpoint === 'history') {
-    // --- CORRECCIÓN AQUÍ ---
-    // Usamos el nombre exacto de la documentación
-    bodyPayload.FUNC = 'DATOSHISTORICOS';
-    
-    // Parámetros en español según doc
-    bodyPayload.paramsData = {
-      vehiculo: patente, // Aquí llegará el ID numérico largo (gps)
-      tipoID: 'gps',     // Especificamos que enviamos el ID de GPS
-      desde: from,       // YYYY-MM-DD HH:MM:SS
-      hasta: to
-    };
-  }
+  // Payload de sesión que ya sabemos que funciona
+  const sessionData = {
+    user: USER,
+    pwd: PASS,
+    lang: "es",
+    production: 1,
+    temporalInvitationModeEnabled: 0,
+    trackerModeEnabled: 0
+  };
 
   try {
-    const response = await fetch(API_URL, {
+    // --- PASO 1: LOGIN (INITIALIZE) PARA OBTENER LA COOKIE DE SESIÓN ---
+    const loginPayload = {
+      FUNC: "INITIALIZE",
+      paramsData: { auditReEntry: true },
+      pr: "https:",
+      session: sessionData
+    };
+
+    const loginRes = await fetch(API_URL, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Referer': 'https://gps.commers.com.ar/StreetZ/',
-        'Origin': 'https://gps.commers.com.ar',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      body: JSON.stringify(bodyPayload)
+      headers: baseHeaders,
+      body: JSON.stringify(loginPayload)
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return { statusCode: response.status, body: `Error Servidor: ${text}` };
+    if (!loginRes.ok) throw new Error(`Login falló: ${loginRes.status}`);
+    
+    // Capturamos la cookie 'JSESSIONID' que es la que importa
+    const cookies = loginRes.headers.get('set-cookie');
+    if (!cookies) throw new Error("No se pudo obtener la cookie de sesión.");
+
+    // --- PASO 2: PEDIR LOS DATOS REALES USANDO LA COOKIE ---
+    let targetPayload = {
+      session: sessionData,
+      pr: "https:"
+    };
+
+    if (endpoint === 'assets') {
+      targetPayload.FUNC = 'GETLASTDATA'; 
+      targetPayload.paramsData = {};
+    } else if (endpoint === 'history') {
+      targetPayload.FUNC = 'GETHISTORY';
+      targetPayload.paramsData = {
+          elementId: patente,
+          beginDate: from, 
+          endDate: to
+      };
     }
 
-    const data = await response.json();
+    const dataRes = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        ...baseHeaders,
+        'Cookie': cookies // Pasamos la cookie capturada
+      },
+      body: JSON.stringify(targetPayload)
+    });
 
+    if (!dataRes.ok) {
+      const errorTxt = await dataRes.text();
+      return { statusCode: dataRes.status, body: `Error en la petición de datos: ${errorTxt}` };
+    }
+
+    const json = await dataRes.json();
+    
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(data)
+      body: JSON.stringify(json)
     };
 
   } catch (error) {
+    console.error("Error en la función Netlify:", error);
     return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
   }
 };
