@@ -1,26 +1,19 @@
 export const handler = async (event, context) => {
-  // Volvemos a la URL que sabemos que existe y responde (main.jss)
-  const API_URL = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
-  
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
   if (!USER || !PASS) return { statusCode: 500, body: "Faltan credenciales" };
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
+  let targetUrl = '';
+  let bodyPayload = {};
 
-  // Headers estándar
-  const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://gps.commers.com.ar/StreetZ/',
-    'Origin': 'https://gps.commers.com.ar'
-  };
-
-  try {
-    // --- PASO 1: LOGIN (INITIALIZE) ---
-    console.log("1. Autenticando con INITIALIZE...");
-    const loginPayload = {
+  // --- ESCENARIO 1: LISTA DE VEHÍCULOS (Lo que ya funcionó) ---
+  if (endpoint === 'assets') {
+    // Usamos el script interno que sabemos que responde bien con tus credenciales
+    targetUrl = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
+    
+    bodyPayload = {
       FUNC: "INITIALIZE",
       paramsData: { auditReEntry: true },
       pr: "https:",
@@ -28,66 +21,66 @@ export const handler = async (event, context) => {
         user: USER,
         pwd: PASS,
         lang: "es",
-        production: 1,
-        temporalInvitationModeEnabled: 0,
-        trackerModeEnabled: 0
+        production: 1
       }
     };
-
-    const loginRes = await fetch(API_URL, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(loginPayload)
-    });
-
-    if (!loginRes.ok) throw new Error(`Login falló: ${loginRes.status}`);
-
-    const loginJson = await loginRes.json();
+  } 
+  
+  // --- ESCENARIO 2: HISTORIAL (Según documentación oficial) ---
+  else if (endpoint === 'history') {
+    // Apuntamos al endpoint API estándar de Cybermapa/StreetZ
+    targetUrl = 'https://gps.commers.com.ar/StreetZ/json/';
     
-    // AQUÍ ESTÁ LA CLAVE: Capturamos la sesión que nos dio el servidor
-    const activeSession = loginJson.session;
-    
-    if (!activeSession) throw new Error("El servidor no devolvió una sesión válida.");
+    bodyPayload = {
+      action: "DATOSHISTORICOS",
+      user: USER,
+      pwd: PASS,
+      vehiculo: patente, // Enviaremos el ID numérico (gps)
+      tipoID: "gps",     // Especificamos que enviamos el ID interno
+      desde: from,       // YYYY-MM-DD HH:MM:SS
+      hasta: to
+    };
+  }
 
-    // --- PASO 2: PEDIR DATOS CON LA SESIÓN ACTIVA ---
-    console.log("2. Pidiendo datos con sesión activa...");
-    
-    let dataPayload = {
-      session: activeSession, // <--- ENVIAMOS LA SESIÓN ACTUALIZADA
-      pr: "https:"
+  try {
+    // Headers universales para evitar bloqueos
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer': 'https://gps.commers.com.ar/StreetZ/',
+      'Origin': 'https://gps.commers.com.ar'
     };
 
-    if (endpoint === 'assets') {
-      dataPayload.FUNC = 'GETLASTDATA';
-      dataPayload.paramsData = {};
-    } 
-    else if (endpoint === 'history') {
-      dataPayload.FUNC = 'GETHISTORY';
-      dataPayload.paramsData = {
-          elementId: patente, // ID o Patente
-          beginDate: from, 
-          endDate: to
-      };
-    }
-
-    const dataRes = await fetch(API_URL, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify(dataPayload)
+      body: JSON.stringify(bodyPayload)
     });
 
-    if (!dataRes.ok) throw new Error(`Error Datos: ${dataRes.status}`);
+    if (!response.ok) {
+      const text = await response.text();
+      return { statusCode: response.status, body: `Error Servidor: ${text}` };
+    }
 
-    const finalJson = await dataRes.json();
+    const data = await response.json();
+
+    // --- LIMPIEZA DE RESPUESTA PARA EL FRONTEND ---
+    let finalResponse = data;
+
+    // Si es assets (INITIALIZE), extraemos solo la lista que nos interesa
+    if (endpoint === 'assets') {
+        if (data.loginPositions) {
+            finalResponse = { unidades: data.loginPositions };
+        }
+    }
 
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(finalJson)
+      body: JSON.stringify(finalResponse)
     };
 
   } catch (error) {
-    console.error(error);
     return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
   }
 };

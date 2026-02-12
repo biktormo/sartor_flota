@@ -1,67 +1,54 @@
 // src/utils/gpsService.js
 
-// 1. Obtener lista de vehículos
+// 1. Obtener lista de vehículos (Restaurado a lo que funcionaba)
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
+    
+    if (!response.ok) throw new Error(`Error red: ${response.status}`);
+
     const json = await response.json();
-    
-    console.log("📡 GETLASTDATA RESULTADO:", json);
+    console.log("📡 LISTA VEHÍCULOS (RAW):", json);
 
-    let rawAssets = [];
-
-    // Estrategias de búsqueda para la respuesta de Commers
-    // 1. Array directo en propiedades comunes
-    if (json.rows && Array.isArray(json.rows)) rawAssets = json.rows;
-    else if (json.data && Array.isArray(json.data)) rawAssets = json.data;
-    else if (json.items && Array.isArray(json.items)) rawAssets = json.items;
-    
-    // 2. Objeto con IDs como claves (Muy común: { "25": {...}, "26": {...} })
-    else if (typeof json === 'object' && json !== null) {
-        // Filtramos claves que parecen vehículos (tienen uID o nombre)
-        // Ignoramos claves de sistema como 'session', 'status', etc.
-        rawAssets = Object.values(json).filter(val => 
-            val && typeof val === 'object' && (val.uID || val.id || val.n || val.dsc || val.lt)
-        );
-    }
+    // Buscamos la propiedad que devolvió INITIALIZE en tu captura
+    // La función Netlify la empaqueta en 'unidades' o viene directo si devolvió 'loginPositions'
+    const rawAssets = json.unidades || json.loginPositions || [];
 
     if (rawAssets.length === 0) {
-        console.warn("⚠️ Lista vacía. Ver consola.");
+        console.warn("⚠️ Lista vacía. Revisa la consola.");
     }
 
     return rawAssets.map(asset => ({
-      // Mapeo de campos 'minificados' (n=name, p=plate, etc)
-      id: asset.uID || asset.id || asset.unitID,
-      name: asset.n || asset.dsc || asset.name || asset.alias || 'Sin Nombre',
-      plate: asset.p || asset.plate || asset.n || '' // Si no hay patente, usamos nombre
-    })).filter(a => a.id); // Solo retornamos los que tienen ID válido
+      // MAPEO EXACTO BASADO EN TU CAPTURA DE PANTALLA:
+      id: asset.gps,         // El ID numérico es 'gps' (ej: "86528...")
+      name: asset.alias,     // El nombre visual es 'alias' (ej: "MOVIL 25...")
+      plate: asset.patente   // La patente es 'patente' (ej: "AA472RQ")
+    }));
 
   } catch (error) {
-    console.error("Error GPS:", error);
+    console.error("Error GPS Assets:", error);
     return [];
   }
 };
 
-// 2. Obtener Historial
-export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
+// 2. Obtener Historial (Usando la API Documentada)
+export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
   try {
-    // Formato exacto para WService.js: "yyyy-mm-dd hh:mm:ss"
     const format = (d) => {
         const pad = (n) => n.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
     
-    // Asegurar rango completo
+    // Rango completo
     const fromDate = new Date(dateFrom); fromDate.setHours(0,0,0);
     const toDate = new Date(dateTo); toDate.setHours(23,59,59);
 
     const fromStr = format(fromDate);
     const toStr = format(toDate);
     
-    console.log(`📡 Solicitando historial: ${patente}`);
+    console.log(`📡 Pidiendo Historial ID: ${assetId}`);
 
-    // Enviamos la PATENTE, ya que en la función configuramos tipoID='patente'
-    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
+    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${assetId}&from=${fromStr}&to=${toStr}`);
     const json = await response.json();
     
     console.log("📡 HISTORIAL RECIBIDO:", json);
@@ -69,27 +56,31 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
     let totalDistance = 0;
     let routePoints = [];
 
-    // --- PARSEO RESPUESTA DATOSHISTORICOS ---
+    // --- PARSEO DATOSHISTORICOS ---
+    // Según doc, puede venir paginado o con resumen
     
-    // 1. Distancia
-    // A veces viene en 'resumen.distancia', a veces en 'totales.distancia'
-    if (json.resumen && json.resumen.distancia) totalDistance = parseFloat(json.resumen.distancia);
-    else if (json.totales && json.totales.distancia) totalDistance = parseFloat(json.totales.distancia);
+    // 1. Distancia Total
+    if (json.resumen && json.resumen.distancia) {
+      totalDistance = parseFloat(json.resumen.distancia);
+    } 
+    else if (json.totales && json.totales.distancia) {
+      totalDistance = parseFloat(json.totales.distancia);
+    }
 
-    // 2. Puntos (Coordenadas)
-    // Puede venir en 'datos', 'filas', 'puntos'
-    const dataPoints = json.datos || json.filas || json.puntos || [];
+    // 2. Puntos del mapa
+    // La doc dice que devuelve una lista. Buscamos 'datos', 'filas' o 'result'
+    const dataPoints = json.datos || json.filas || json.result || [];
     
     if (Array.isArray(dataPoints) && dataPoints.length > 0) {
-      // Si no hay resumen, intentamos sacar la distancia del último punto
+      // Si no hubo resumen, intentamos sumar o tomar el acumulado del último punto
       if (totalDistance === 0) {
          const last = dataPoints[dataPoints.length-1];
-         // Buscar campos comunes de distancia acumulada
+         // Buscamos campos comunes de distancia acumulada
          if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
          else if (last.distancia) totalDistance = parseFloat(last.distancia);
       }
 
-      // Extraer Lat/Lon
+      // Mapear Latitud/Longitud
       routePoints = dataPoints
         .filter(p => (p.lat && p.lon) || (p.y && p.x))
         .map(p => {
@@ -106,26 +97,18 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
     };
 
   } catch (error) {
-    console.error(`Error obteniendo historial:`, error);
+    console.error(`Error historial:`, error);
     return { totalDistance: 0, routePoints: [], heatPoints: [] };
   }
 };
 
-// 3. Obtener distancia SIMPLE (Para la tabla de comparación)
-export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
-    // Reutilizamos la lógica del historial completo pero devolvemos solo el número
-    const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
-    return data.totalDistance;
-};
-
-// 4. Algoritmo de Mapeo (Con tu lógica de negocio)
+// 3. Match Fleet Data (Sin cambios, usa lo anterior)
 export const matchFleetData = (csvData, gpsAssets) => {
   const matchedData = [];
   const csvSummary = {};
   let minDate = new Date();
   let maxDate = new Date(0);
 
-  // Agrupar CSV
   csvData.forEach(row => {
     if (!csvSummary[row.unidad]) {
       csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
@@ -141,22 +124,16 @@ export const matchFleetData = (csvData, gpsAssets) => {
   Object.keys(csvSummary).forEach(unidadCsv => {
     const csvInfo = csvSummary[unidadCsv];
     
-    // Normalizar
     const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const csvPlaca = clean(csvInfo.placa);
-    const csvUnidad = clean(unidadCsv); // Ej: "25"
+    const csvUnidad = clean(unidadCsv);
 
     const gpsAsset = gpsAssets.find(asset => {
-      const gpsPlaca = clean(asset.plate); // Viene de 'patente'
-      const gpsName = clean(asset.name);   // Viene de 'alias' (ej: "MOVIL25...")
+      const gpsPlaca = clean(asset.plate);
+      const gpsName = clean(asset.name);
 
-      // 1. Coincidencia Patente
       if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
-      
-      // 2. Coincidencia por Nombre (contiene la unidad)
-      // Ej: GPS "MOVIL25" contiene CSV "25"
       if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
-      
       return false;
     });
 
@@ -165,13 +142,19 @@ export const matchFleetData = (csvData, gpsAssets) => {
       placa: csvInfo.placa,
       litrosCsv: csvInfo.litros,
       costoCsv: csvInfo.costo,
-      gpsId: gpsAsset ? gpsAsset.id : null, 
+      gpsId: gpsAsset ? asset.id : null, // ID numérico
       gpsName: gpsAsset ? gpsAsset.name : null,
-      gpsSearchKey: gpsAsset ? gpsAsset.plate : null, // Usamos la patente para buscar historial
+      gpsSearchKey: gpsAsset ? asset.id : null, // Usamos ID numérico para buscar
       gpsDistance: 0,
       rendimientoReal: 0
     });
   });
 
   return { matchedData, dateRange: { min: minDate, max: maxDate } };
+};
+
+// 4. Distancia simple (Reutiliza el historial)
+export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
+    const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
+    return data.totalDistance;
 };
