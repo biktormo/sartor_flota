@@ -6,30 +6,38 @@ export const fetchGpsAssets = async () => {
     const response = await fetch('/api/cybermapa?endpoint=assets');
     const json = await response.json();
     
-    console.log("📡 API GETVEHICULOS:", json);
+    console.log("📡 GETLASTDATA RESULTADO:", json);
 
-    // Búsqueda del array según tu captura exitosa anterior
     let rawAssets = [];
-    if (json.unidades && Array.isArray(json.unidades)) {
-        rawAssets = json.unidades;
-    } else if (Array.isArray(json)) {
-        rawAssets = json;
+
+    // Estrategias de búsqueda para la respuesta de Commers
+    // 1. Array directo en propiedades comunes
+    if (json.rows && Array.isArray(json.rows)) rawAssets = json.rows;
+    else if (json.data && Array.isArray(json.data)) rawAssets = json.data;
+    else if (json.items && Array.isArray(json.items)) rawAssets = json.items;
+    
+    // 2. Objeto con IDs como claves (Muy común: { "25": {...}, "26": {...} })
+    else if (typeof json === 'object' && json !== null) {
+        // Filtramos claves que parecen vehículos (tienen uID o nombre)
+        // Ignoramos claves de sistema como 'session', 'status', etc.
+        rawAssets = Object.values(json).filter(val => 
+            val && typeof val === 'object' && (val.uID || val.id || val.n || val.dsc || val.lt)
+        );
     }
 
     if (rawAssets.length === 0) {
-        console.warn("⚠️ Lista vacía o formato desconocido.");
-        return [];
+        console.warn("⚠️ Lista vacía. Ver consola.");
     }
 
     return rawAssets.map(asset => ({
-      // MAPEO EXACTO SEGÚN TU CAPTURA DE PANTALLA:
-      id: asset.gps,         // El ID numérico viene en el campo 'gps'
-      name: asset.alias,     // El nombre viene en 'alias' (ej: "MOVIL 25...")
-      plate: asset.patente   // La patente viene en 'patente'
-    }));
+      // Mapeo de campos 'minificados' (n=name, p=plate, etc)
+      id: asset.uID || asset.id || asset.unitID,
+      name: asset.n || asset.dsc || asset.name || asset.alias || 'Sin Nombre',
+      plate: asset.p || asset.plate || asset.n || '' // Si no hay patente, usamos nombre
+    })).filter(a => a.id); // Solo retornamos los que tienen ID válido
 
   } catch (error) {
-    console.error("Error GPS Assets:", error);
+    console.error("Error GPS:", error);
     return [];
   }
 };
