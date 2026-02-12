@@ -1,85 +1,95 @@
 // src/utils/gpsService.js
 
-// --- TU CÓDIGO BASE QUE FUNCIONA ---
+// 1. Obtener lista de vehículos
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
-    const json = await response.json();
     
-    console.log("📡 API GETVEHICULOS:", json);
-
-    // Lectura correcta de la propiedad 'unidades'
-    const rawAssets = json.unidades || [];
-
-    if (!Array.isArray(rawAssets) || rawAssets.length === 0) {
-        console.warn("⚠️ No se encontraron vehículos en la propiedad 'unidades'.");
-        return [];
+    if (!response.ok) {
+        throw new Error(`Error red: ${response.status}`);
     }
 
-    return rawAssets.map(asset => ({
-      id: asset.id_gps,   // ID numérico
-      name: asset.alias,  // Nombre visual
-      plate: asset.patente // Patente para búsquedas
-    }));
+    const json = await response.json();
+    console.log("📡 API GETVEHICULOS (RAW):", json);
+
+    let rawAssets = [];
+
+    // ESTRATEGIA DE BÚSQUEDA ROBUSTA
+    if (Array.isArray(json)) {
+        rawAssets = json;
+    }
+    else if (json.unidades && Array.isArray(json.unidades)) {
+        rawAssets = json.unidades;
+    }
+    else if (json.datos && Array.isArray(json.datos)) {
+        rawAssets = json.datos;
+    }
+    // Caso: Respuesta de 'INITIALIZE' (tu caso actual)
+    else if (json.loginPositions && Array.isArray(json.loginPositions)) {
+        rawAssets = json.loginPositions;
+    }
+    else if (json.data) {
+        if (Array.isArray(json.data)) rawAssets = json.data;
+        else if (json.data.units) rawAssets = json.data.units;
+    }
+
+    if (rawAssets.length === 0) {
+        console.warn("⚠️ Lista vacía.");
+    }
+
+    return rawAssets.map(asset => {
+      // Normalizar datos
+      // En loginPositions: uID, n (nombre), p (patente)
+      return {
+        id: asset.uID || asset.id || asset.id_gps || asset.unitID,
+        name: asset.n || asset.name || asset.alias || asset.dsc || 'Sin Nombre',
+        plate: asset.p || asset.plate || asset.patente || asset.n || ''
+      };
+    }).filter(v => v.id);
 
   } catch (error) {
-    console.error("Error procesando flota GPS:", error);
+    console.error("Error GPS Assets:", error);
     return [];
   }
 };
 
-// --- NUEVA FUNCIONALIDAD: HISTORIAL ---
-
+// 2. Obtener Historial Completo (Para Mapas y Cálculos)
 export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
   try {
-    // Formateador de fecha exacto para la API: "YYYY-MM-DD HH:MM:SS"
     const format = (d) => {
         const pad = (n) => n.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
     
-    // Aseguramos cubrir el día completo (00:00 a 23:59)
     const fromDate = new Date(dateFrom); fromDate.setHours(0, 0, 0);
     const toDate = new Date(dateTo); toDate.setHours(23, 59, 59);
 
     const fromStr = format(fromDate);
     const toStr = format(toDate);
     
-    console.log(`📡 Pidiendo Historial para Patente: ${patente}`);
-
-    // Llamamos a tu backend que usa DATOSHISTORICOS con tipoID='patente'
     const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
-    
-    if (!response.ok) throw new Error("Error en la petición al servidor");
-
     const json = await response.json();
-    console.log("📡 HISTORIAL RAW:", json);
-
+    
     let totalDistance = 0;
     let routePoints = [];
+    
+    // 1. Distancia en resumen
+    if (json.resumen && json.resumen.distancia) {
+      totalDistance = parseFloat(json.resumen.distancia);
+    } else if (json.totales && json.totales.distancia) {
+      totalDistance = parseFloat(json.totales.distancia);
+    }
 
-    // --- PARSEO DE RESPUESTA HISTÓRICA ---
-    // La API suele devolver la lista en 'result', 'datos' o 'filas'
-    const dataPoints = json.result || json.datos || json.filas || (Array.isArray(json) ? json : []);
+    // 2. Puntos
+    const dataPoints = json.filas || json.datos || json.result || (Array.isArray(json) ? json : []);
     
     if (dataPoints.length > 0) {
-      // 1. Calcular Distancia
-      // A veces viene un resumen, sino tomamos el acumulado del último punto
-      if (json.resumen && json.resumen.distancia) {
-          totalDistance = parseFloat(json.resumen.distancia);
-      } else {
-          const last = dataPoints[dataPoints.length - 1];
-          // Buscamos campos comunes de distancia acumulada
-          if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
-          else if (last.distancia) totalDistance = parseFloat(last.distancia);
-          else if (last.odometro) {
-              // Si solo hay odómetro, restamos el último menos el primero
-              const first = dataPoints[0];
-              totalDistance = parseFloat(last.odometro) - parseFloat(first.odometro);
-          }
+      if (totalDistance === 0) {
+        const lastPoint = dataPoints[dataPoints.length - 1];
+        if (lastPoint.distancia_acumulada) totalDistance = parseFloat(lastPoint.distancia_acumulada);
+        else if (lastPoint.distancia) totalDistance = parseFloat(lastPoint.distancia);
       }
-
-      // 2. Extraer Coordenadas para el Mapa
+      
       routePoints = dataPoints
         .filter(p => (p.lat && p.lon) || (p.y && p.x))
         .map(p => {
@@ -90,32 +100,43 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
     }
 
     return {
-      totalDistance: Math.max(0, totalDistance), // Evitar negativos
+      totalDistance,
       routePoints,
-      heatPoints: routePoints.map(p => [p[0], p[1], 1]), // Formato para mapa de calor
+      heatPoints: routePoints.map(p => [p[0], p[1], 1]), 
     };
 
   } catch (error) {
-    console.error(`Error obteniendo historial:`, error);
+    console.error(`Error historial:`, error);
     return { totalDistance: 0, routePoints: [], heatPoints: [] };
   }
 };
 
-// --- ALGORITMO DE VINCULACIÓN (Usando tu base) ---
+// 3. Obtener Distancia Simple (Wrapper para la página de comparación)
+// ESTA ES LA FUNCIÓN QUE FALTABA Y CAUSABA EL ERROR
+export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
+    const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
+    return data.totalDistance;
+};
+
+// 4. Algoritmo de Mapeo
 export const matchFleetData = (csvData, gpsAssets) => {
   const matchedData = [];
   const csvSummary = {};
+  let minDate = new Date();
+  let maxDate = new Date(0);
 
-  // Agrupar CSV
   csvData.forEach(row => {
     if (!csvSummary[row.unidad]) {
       csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
     }
     csvSummary[row.unidad].litros += row.litros;
     csvSummary[row.unidad].costo += row.costo;
+
+    const rowDate = row.timestamp ? new Date(row.timestamp) : new Date();
+    if (rowDate < minDate) minDate = rowDate;
+    if (rowDate > maxDate) maxDate = rowDate;
   });
 
-  // Cruzar
   Object.keys(csvSummary).forEach(unidadCsv => {
     const csvInfo = csvSummary[unidadCsv];
     const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -126,11 +147,8 @@ export const matchFleetData = (csvData, gpsAssets) => {
       const gpsPlaca = clean(asset.plate);
       const gpsName = clean(asset.name);
 
-      // Coincidencia Patente
       if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
-      // Coincidencia Nombre (alias) contiene unidad CSV
       if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
-      
       return false;
     });
 
@@ -139,14 +157,15 @@ export const matchFleetData = (csvData, gpsAssets) => {
       placa: csvInfo.placa,
       litrosCsv: csvInfo.litros,
       costoCsv: csvInfo.costo,
-      gpsId: gpsAsset ? gpsAsset.id : null,
+      gpsId: gpsAsset ? (gpsAsset.id || gpsAsset.plate) : null, 
       gpsName: gpsAsset ? gpsAsset.name : null,
-      // IMPORTANTE: Guardamos la patente vinculada para pedir el historial después
-      linkedPlate: gpsAsset ? gpsAsset.plate : null, 
+      // Para historial usamos ID si es numérico o Patente si es string, depende de la API
+      // En tu caso 'id_gps' parecía ser el ID numérico
+      gpsSearchKey: gpsAsset ? gpsAsset.id : null,
       gpsDistance: 0,
       rendimientoReal: 0
     });
   });
 
-  return { matchedData, dateRange: { min: new Date(), max: new Date() } }; // (Rangos simplificados)
+  return { matchedData, dateRange: { min: minDate, max: maxDate } };
 };
