@@ -88,6 +88,7 @@ function App() {
               <Route path="/gaps" element={<GapsPage data={fleetData} />} />
               <Route path="/gps-check" element={<GpsComparisonPage data={fleetData} />} />
               <Route path="/gps-reports" element={<GpsReportPage />} />
+              <Route path="/gps-analysis" element={<GpsReportPage />} />
             </Routes>
           </main>
         </div>

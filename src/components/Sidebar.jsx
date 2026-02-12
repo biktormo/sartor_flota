@@ -68,6 +68,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             <NavLink to="/settings" className={linkClass}><Settings size={18} /> Configuración</NavLink>
             <NavLink to="/gaps" className={linkClass}><FileSearch size={18} /> Auditoría / Diferencias</NavLink>
             <NavLink to="/gps-reports" className={linkClass}><RouteIcon size={18} /> Análisis GPS</NavLink>
+            <NavLink to="/gps-analysis" className={linkClass}><Route size={18} /> Análisis GPS</NavLink>
           </div>
         </nav>
 

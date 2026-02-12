@@ -1,86 +1,94 @@
+// netlify/functions/cybermapa.js
+
 export const handler = async (event, context) => {
+  // 1. URL DE LA API (WService.js)
+  const API_URL = 'https://gps.commers.com.ar/API/WService.js';
+
+  // 2. CREDENCIALES DESDE NETLIFY
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
-  if (!USER || !PASS) return { statusCode: 500, body: "Faltan credenciales" };
-
-  const { endpoint, from, to, patente } = event.queryStringParameters;
-  let targetUrl = '';
-  let bodyPayload = {};
-
-  // --- ESCENARIO 1: LISTA DE VEHÍCULOS (Lo que ya funcionó) ---
-  if (endpoint === 'assets') {
-    // Usamos el script interno que sabemos que responde bien con tus credenciales
-    targetUrl = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
-    
-    bodyPayload = {
-      FUNC: "INITIALIZE",
-      paramsData: { auditReEntry: true },
-      pr: "https:",
-      session: {
-        user: USER,
-        pwd: PASS,
-        lang: "es",
-        production: 1
-      }
-    };
-  } 
-  
-  // --- ESCENARIO 2: HISTORIAL (Según documentación oficial) ---
-  else if (endpoint === 'history') {
-    // Apuntamos al endpoint API estándar de Cybermapa/StreetZ
-    targetUrl = 'https://gps.commers.com.ar/StreetZ/json/';
-    
-    bodyPayload = {
-      action: "DATOSHISTORICOS",
-      user: USER,
-      pwd: PASS,
-      vehiculo: patente, // Enviaremos el ID numérico (gps)
-      tipoID: "gps",     // Especificamos que enviamos el ID interno
-      desde: from,       // YYYY-MM-DD HH:MM:SS
-      hasta: to
+  if (!USER || !PASS) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Faltan credenciales en Netlify Environment Variables" })
     };
   }
 
-  try {
-    // Headers universales para evitar bloqueos
-    const headers = {
-      'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer': 'https://gps.commers.com.ar/StreetZ/',
-      'Origin': 'https://gps.commers.com.ar'
-    };
+  // 3. OBTENER PARÁMETROS DEL FRONTEND
+  const { endpoint, from, to, patente } = event.queryStringParameters;
 
-    const response = await fetch(targetUrl, {
+  // 4. CONSTRUIR EL PAYLOAD BASE (Autenticación)
+  let bodyPayload = {
+    user: USER,
+    pwd: PASS
+  };
+
+  // 5. SELECCIONAR LA ACCIÓN SEGÚN EL ENDPOINT
+  if (endpoint === 'assets') {
+    // Acción para obtener la lista de flota
+    // Según tu captura exitosa, esto devuelve { unidades: [...] }
+    bodyPayload.action = 'GETVEHICULOS';
+  } 
+  else if (endpoint === 'history') {
+    // Acción para obtener el recorrido histórico
+    bodyPayload.action = 'DATOSHISTORICOS';
+    
+    // Parámetros específicos del historial
+    bodyPayload.vehiculo = patente; // Aquí llegará el ID (ej: 8652...)
+    bodyPayload.tipoID = 'gps';     // Indicamos que estamos enviando el ID interno del GPS
+    bodyPayload.desde = from;       // Formato YYYY-MM-DD HH:MM:SS
+    bodyPayload.hasta = to;
+    
+    // Opcional: Pedir campos específicos si la API lo soporta
+    // bodyPayload.output = ['lat', 'lon', 'velocidad', 'odometro', 'evento']; 
+  }
+
+  try {
+    // 6. HACER LA PETICIÓN AL SERVIDOR DE COMMERS
+    const response = await fetch(API_URL, {
       method: 'POST',
-      headers: headers,
+      headers: { 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify(bodyPayload)
     });
 
+    // Manejo de errores del servidor externo
     if (!response.ok) {
       const text = await response.text();
-      return { statusCode: response.status, body: `Error Servidor: ${text}` };
+      return { 
+        statusCode: response.status, 
+        body: `Error Servidor GPS: ${text}` 
+      };
     }
 
+    // 7. PROCESAR RESPUESTA
     const data = await response.json();
 
-    // --- LIMPIEZA DE RESPUESTA PARA EL FRONTEND ---
-    let finalResponse = data;
-
-    // Si es assets (INITIALIZE), extraemos solo la lista que nos interesa
-    if (endpoint === 'assets') {
-        if (data.loginPositions) {
-            finalResponse = { unidades: data.loginPositions };
-        }
+    // Verificación extra: A veces devuelven 200 OK pero con un error lógico en el JSON
+    if (data.status === 'rechazado' || data.error) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify(data)
+        };
     }
 
+    // 8. DEVOLVER AL FRONTEND
     return {
       statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(finalResponse)
+      headers: { 
+        "Access-Control-Allow-Origin": "*", 
+        "Content-Type": "application/json" 
+      },
+      body: JSON.stringify(data)
     };
 
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: error.toString() }) };
+    console.error("Error en función Netlify:", error);
+    return { 
+      statusCode: 500, 
+      body: JSON.stringify({ error: error.toString() }) 
+    };
   }
 };
