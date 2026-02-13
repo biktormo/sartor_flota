@@ -4,43 +4,40 @@
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
-    
-    if (!response.ok) {
-        throw new Error(`Error red: ${response.status}`);
-    }
-
     const json = await response.json();
+    
     console.log("📡 API GETVEHICULOS (RAW):", json);
 
     let rawAssets = [];
 
-    // ESTRATEGIA DE BÚSQUEDA ROBUSTA
+    // --- CORRECCIÓN DE ESTRUCTURA ---
+    // 1. Caso Actual (Tu captura): La respuesta ES el array directamente
     if (Array.isArray(json)) {
         rawAssets = json;
     }
+    // 2. Caso Alternativo: Viene dentro de 'unidades'
     else if (json.unidades && Array.isArray(json.unidades)) {
         rawAssets = json.unidades;
     }
+    // 3. Caso Alternativo: Viene dentro de 'datos'
     else if (json.datos && Array.isArray(json.datos)) {
         rawAssets = json.datos;
     }
-    else if (json.loginPositions && Array.isArray(json.loginPositions)) {
-        rawAssets = json.loginPositions;
-    }
-    else if (json.data) {
-        if (Array.isArray(json.data)) rawAssets = json.data;
-        else if (json.data.units) rawAssets = json.data.units;
-    }
 
     if (rawAssets.length === 0) {
-        console.warn("⚠️ Lista vacía.");
+        console.warn("⚠️ Lista vacía o formato desconocido.");
+        return [];
     }
 
     return rawAssets.map(asset => ({
-      id: asset.uID || asset.id || asset.id_gps || asset.unitID,
-      name: asset.n || asset.name || asset.alias || asset.dsc || 'Sin Nombre',
-      plate: asset.p || asset.plate || asset.patente || asset.n || ''
-    })).filter(v => v.id);
+      // MAPEO SEGÚN TU CAPTURA DE PANTALLA:
+      // El ID único viene en la propiedad 'gps'
+      id: asset.gps || asset.id,         
+      // El nombre visual viene en 'alias' o 'nombre'
+      name: asset.alias || asset.nombre || 'Sin Nombre', 
+      // La patente viene en 'patente'
+      plate: asset.patente || ''   
+    }));
 
   } catch (error) {
     console.error("Error GPS Assets:", error);
@@ -48,7 +45,7 @@ export const fetchGpsAssets = async () => {
   }
 };
 
-// 2. Obtener Historial Completo (Para Mapas y Cálculos)
+// 2. Obtener Historial Completo
 export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
   try {
     const format = (d) => {
@@ -67,19 +64,17 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
     const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
     const json = await response.json();
     
-    console.log("📡 HISTORIAL RECIBIDO:", json);
-
     let totalDistance = 0;
     let routePoints = [];
     
-    // 1. Distancia en resumen
+    // Distancia
     if (json.resumen && json.resumen.distancia) {
       totalDistance = parseFloat(json.resumen.distancia);
     } else if (json.totales && json.totales.distancia) {
       totalDistance = parseFloat(json.totales.distancia);
     }
 
-    // 2. Puntos
+    // Puntos
     const dataPoints = json.filas || json.datos || json.result || (Array.isArray(json) ? json : []);
     
     if (dataPoints.length > 0) {
@@ -110,19 +105,20 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
   }
 };
 
-// 3. Obtener Distancia Simple (Wrapper para la página de comparación)
+// 3. Obtener Distancia Simple
 export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
     const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
     return data.totalDistance;
 };
 
-// 4. Algoritmo de Mapeo
+// 4. Algoritmo de Mapeo (Vinculación)
 export const matchFleetData = (csvData, gpsAssets) => {
   const matchedData = [];
   const csvSummary = {};
   let minDate = new Date();
   let maxDate = new Date(0);
 
+  // Agrupar CSV
   csvData.forEach(row => {
     if (!csvSummary[row.unidad]) {
       csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
@@ -137,16 +133,30 @@ export const matchFleetData = (csvData, gpsAssets) => {
 
   Object.keys(csvSummary).forEach(unidadCsv => {
     const csvInfo = csvSummary[unidadCsv];
+    
+    // Normalizar datos para comparar
     const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     const csvPlaca = clean(csvInfo.placa);
-    const csvUnidad = clean(unidadCsv);
+    const csvUnidad = clean(unidadCsv); // Ej: "25"
 
     const gpsAsset = gpsAssets.find(asset => {
       const gpsPlaca = clean(asset.plate);
-      const gpsName = clean(asset.name);
+      const gpsName = clean(asset.name); // Ej: "MOVIL 25..."
 
+      // 1. Coincidencia por Patente (Prioridad)
       if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
-      if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
+      
+      // 2. Coincidencia por Nombre (Si el nombre contiene el número de unidad)
+      // Buscamos si "25" está dentro de "MOVIL 25"
+      if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) {
+          // Verificación extra para no confundir unidad "2" con "25"
+          // Buscamos bordes de palabra o el número tal cual
+          if (gpsName === csvUnidad || gpsName.includes(` ${csvUnidad}`) || gpsName.includes(`${csvUnidad} `)) {
+              return true;
+          }
+          // Si el CSV es "25" y GPS es "MOVIL 25", un includes simple suele bastar
+          return true;
+      }
       
       return false;
     });
@@ -156,7 +166,8 @@ export const matchFleetData = (csvData, gpsAssets) => {
       placa: csvInfo.placa,
       litrosCsv: csvInfo.litros,
       costoCsv: csvInfo.costo,
-      gpsId: gpsAsset ? (gpsAsset.id || gpsAsset.plate) : null, 
+      // Usamos el ID ('gps') para vincular, y la Patente para buscar historial
+      gpsId: gpsAsset ? gpsAsset.id : null, 
       gpsName: gpsAsset ? gpsAsset.name : null,
       gpsSearchKey: gpsAsset ? (gpsAsset.plate || gpsAsset.id) : null,
       gpsDistance: 0,
