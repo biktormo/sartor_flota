@@ -1,7 +1,5 @@
 export const handler = async (event, context) => {
-  // URL OFICIAL DE LA API (Según documentación WService)
   const API_URL = 'https://gps.commers.com.ar/API/WService.js';
-  
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
@@ -9,23 +7,20 @@ export const handler = async (event, context) => {
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  // Payload Base
-  let bodyPayload = {
-    user: USER,
-    pwd: PASS
-  };
+  let bodyPayload = { user: USER, pwd: PASS };
 
-  // --- 1. LISTA DE VEHÍCULOS ---
+  // 1. LISTA (Funciona)
   if (endpoint === 'assets') {
-    // Usamos DATOSACTUALES como indica la documentación oficial
     bodyPayload.action = 'DATOSACTUALES';
   } 
   
-  // --- 2. HISTORIAL ---
+  // 2. HISTORIAL
   else if (endpoint === 'history') {
     bodyPayload.action = 'DATOSHISTORICOS';
-    bodyPayload.vehiculo = patente; // Enviamos el ID numérico (gps)
-    bodyPayload.tipoID = 'gps';     // Importante: tipoID 'gps' para ID numérico
+    // Importante: 'patente' en los params de query, pero aquí lo mapeamos a 'vehiculo'
+    // Ahora recibiremos el ID numérico (ej: 8652...)
+    bodyPayload.vehiculo = patente; 
+    bodyPayload.tipoID = 'gps'; // Coincide con el tipo de dato numérico
     bodyPayload.desde = from;
     bodyPayload.hasta = to;
   }
@@ -44,11 +39,9 @@ export const handler = async (event, context) => {
 
     const data = await response.json();
 
-    // Verificación de errores lógicos de la API
+    // Verificación de error lógico
     if (data.status === 'rechazado' || data.error) {
        console.log("Error API Lógico:", data);
-       // Si DATOSACTUALES falla, un último intento sería LISTAUNIDADES, 
-       // pero la doc dice DATOSACTUALES.
        return { statusCode: 400, body: JSON.stringify(data) };
     }
 

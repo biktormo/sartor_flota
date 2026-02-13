@@ -1,161 +1,184 @@
-// src/utils/gpsService.js
+import React, { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Polyline } from 'react-leaflet';
+import { HeatmapLayer } from 'react-leaflet-heatmap-layer-v3';
+import { fetchGpsAssets, fetchGpsHistory } from '../utils/gpsService';
+import { Route, Loader2, PlayCircle, BarChart, Map as MapIcon, Calendar, Info } from 'lucide-react';
+import 'leaflet/dist/leaflet.css';
 
-// 1. Obtener lista de vehículos
-export const fetchGpsAssets = async () => {
-  try {
-    const response = await fetch('/api/cybermapa?endpoint=assets');
-    const json = await response.json();
-    
-    console.log("📡 API DATOSACTUALES (RAW):", json);
+const heatmapOptions = { radius: 25, blur: 15, maxZoom: 18 };
 
-    let rawAssets = [];
+const GpsReportPage = () => {
+  const [vehicles, setVehicles] = useState([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
+  
+  const [dateRange, setDateRange] = useState({
+    from: new Date(new Date().setDate(new Date().getDate() - 3)).toISOString().split('T')[0],
+    to: new Date().toISOString().split('T')[0]
+  });
+  
+  const [reportData, setReportData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-    // Estrategia de búsqueda para WService.js
-    if (Array.isArray(json)) {
-        rawAssets = json;
-    } else if (json.datos && Array.isArray(json.datos)) {
-        rawAssets = json.datos;
-    } else if (json.result && Array.isArray(json.result)) {
-        rawAssets = json.result;
-    }
-
-    if (rawAssets.length === 0) {
-        console.warn("⚠️ Lista vacía. Ver consola.");
-    }
-
-    return rawAssets.map(asset => ({
-      // Mapeo basado en documentación de StreetZ/WService
-      id: asset.gps || asset.id_gps || asset.id, 
-      name: asset.alias || asset.descripcion || asset.nombre || 'Sin Nombre',
-      plate: asset.patente || asset.placa || '' 
-    })).filter(a => a.id); // Solo devolvemos los que tienen ID
-
-  } catch (error) {
-    console.error("Error GPS Assets:", error);
-    return [];
-  }
-};
-
-// 2. Obtener Historial (Cálculo de Distancia + Puntos)
-export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
-  try {
-    // Formato exacto doc: "yyyy-mm-dd hh:mm:ss"
-    const format = (d) => {
-        const pad = (n) => n.toString().padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  useEffect(() => {
+    const loadAssets = async () => {
+      const assets = await fetchGpsAssets();
+      setVehicles(assets);
     };
-    
-    const fromDate = new Date(dateFrom); fromDate.setHours(0,0,0);
-    const toDate = new Date(dateTo); toDate.setHours(23,59,59);
+    loadAssets();
+  }, []);
 
-    const fromStr = format(fromDate);
-    const toStr = format(toDate);
-    
-    console.log(`📡 Pidiendo Historial ID: ${patente}`);
+  const handleGenerateReport = async () => {
+    if (!selectedVehicleId) {
+      setError('Por favor, selecciona un vehículo.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setReportData(null);
 
-    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
-    const json = await response.json();
+    const vehicle = vehicles.find(v => String(v.id) === String(selectedVehicleId));
     
-    console.log("📡 HISTORIAL RECIBIDO:", json);
-
-    let totalDistance = 0;
-    let routePoints = [];
-
-    // --- PARSEO DATOSHISTORICOS ---
-    
-    // 1. Distancia Total (Resumen)
-    if (json.resumen && json.resumen.distancia) {
-      totalDistance = parseFloat(json.resumen.distancia);
+    if (!vehicle) {
+        setError('Error interno: Vehículo no encontrado.');
+        setLoading(false);
+        return;
     }
 
-    // 2. Puntos del mapa (Posiciones)
-    // La doc dice 'posiciones', a veces es 'datos'
-    const dataPoints = json.posiciones || json.datos || json.filas || [];
-    
-    if (Array.isArray(dataPoints) && dataPoints.length > 0) {
+    try {
+      // --- CORRECCIÓN AQUÍ: Usar estrictamente el ID numérico ---
+      // En gpsService mapeamos 'gps' (el número largo) a 'id'. Usamos ese.
+      const searchKey = vehicle.id; 
+
+      const data = await fetchGpsHistory(
+        searchKey,
+        new Date(dateRange.from),
+        new Date(dateRange.to)
+      );
       
-      // Si no hay resumen, intentamos sacar distancia del último punto
-      if (totalDistance === 0) {
-         const last = dataPoints[dataPoints.length-1];
-         // Buscamos acumulado
-         if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
-         // O calculamos manual (sumando tramos) - Omitido por simplicidad, priorizamos API
+      if (data.routePoints.length === 0 && data.totalDistance === 0) {
+          setError("No se encontraron datos de recorrido para este período.");
+      } else {
+          setReportData(data);
       }
-
-      // Mapear Latitud/Longitud (latitud/longitud según doc)
-      routePoints = dataPoints
-        .filter(p => (p.latitud && p.longitud) || (p.lat && p.lon))
-        .map(p => {
-            const lat = parseFloat(p.latitud || p.lat);
-            const lng = parseFloat(p.longitud || p.lon);
-            return [lat, lng];
-        });
+    } catch (err) {
+      setError('No se pudo generar el reporte. Verifica la conexión con Cybermapa.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    return {
-      totalDistance: Math.max(0, totalDistance),
-      routePoints,
-      heatPoints: routePoints.map(p => [p[0], p[1], 1]), 
-    };
+  return (
+    <div className="p-8 space-y-6 max-w-[1800px] mx-auto">
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            <Route className="text-blue-600" /> Análisis de Recorrido GPS
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">Visualiza rutas históricas y zonas de calor.</p>
+        </div>
+        
+        <div className="flex items-end gap-3 flex-wrap bg-gray-50 p-3 rounded-lg border border-gray-100">
+          <div className="flex flex-col">
+            <label className="text-xs font-bold text-gray-500 mb-1 ml-1">Vehículo</label>
+            <select 
+                value={selectedVehicleId} 
+                onChange={e => setSelectedVehicleId(e.target.value)} 
+                className="w-64 border-gray-300 rounded-md text-sm focus:ring-blue-500 shadow-sm cursor-pointer"
+            >
+              <option value="">-- Seleccionar Unidad --</option>
+              {vehicles.map(v => (
+                <option key={v.id} value={v.id}>
+                    {v.name} {v.plate ? `(${v.plate})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="flex flex-col">
+            <label className="text-xs font-bold text-gray-500 mb-1 ml-1 flex items-center gap-1"><Calendar size={12}/> Desde</label>
+            <input type="date" value={dateRange.from} onChange={e => setDateRange(p => ({...p, from: e.target.value}))} className="border-gray-300 rounded-md text-sm focus:ring-blue-500 shadow-sm cursor-pointer" />
+          </div>
+          
+          <div className="flex flex-col">
+            <label className="text-xs font-bold text-gray-500 mb-1 ml-1 flex items-center gap-1"><Calendar size={12}/> Hasta</label>
+            <input type="date" value={dateRange.to} onChange={e => setDateRange(p => ({...p, to: e.target.value}))} className="border-gray-300 rounded-md text-sm focus:ring-blue-500 shadow-sm cursor-pointer" />
+          </div>
+          
+          <button onClick={handleGenerateReport} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-sm disabled:opacity-50 h-[38px]">
+            {loading ? <Loader2 className="animate-spin" size={18} /> : <PlayCircle size={18} />}
+            {loading ? 'Consultando...' : 'Ver Mapa'}
+          </button>
+        </div>
+      </div>
 
-  } catch (error) {
-    console.error(`Error historial:`, error);
-    return { totalDistance: 0, routePoints: [], heatPoints: [] };
-  }
+      {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
+              <Info size={18} /> {error}
+          </div>
+      )}
+      
+      {reportData && (
+        <div className="animate-in fade-in duration-500 space-y-6">
+          <div className="flex gap-4">
+             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm min-w-[300px]">
+                <p className="text-sm text-gray-500 font-bold uppercase tracking-wider">Distancia Total</p>
+                <p className="text-4xl font-black text-blue-700 mt-1">
+                  {reportData.totalDistance.toLocaleString('es-AR', {maximumFractionDigits: 1})} <span className="text-xl text-gray-400 font-medium">km</span>
+                </p>
+             </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm h-[600px] flex flex-col">
+              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 px-2">
+                  <MapIcon size={20} className="text-green-600"/> Trazado del Recorrido
+              </h3>
+              <div className="flex-1 rounded-lg overflow-hidden border border-gray-200 relative z-0">
+                <MapContainer 
+                    center={reportData.routePoints.length > 0 ? reportData.routePoints[0] : [-34.6, -58.4]} 
+                    zoom={reportData.routePoints.length > 0 ? 10 : 5} 
+                    style={{ height: '100%', width: '100%' }}
+                >
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
+                  {reportData.routePoints.length > 0 && (
+                    <Polyline pathOptions={{ color: '#2563EB', weight: 4, opacity: 0.8 }} positions={reportData.routePoints} />
+                  )}
+                </MapContainer>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm h-[600px] flex flex-col">
+              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 px-2">
+                  <BarChart size={20} className="text-orange-600"/> Zonas de Permanencia (Heatmap)
+              </h3>
+              <div className="flex-1 rounded-lg overflow-hidden border border-gray-200 relative z-0">
+                 <MapContainer 
+                    center={reportData.routePoints.length > 0 ? reportData.routePoints[0] : [-34.6, -58.4]} 
+                    zoom={reportData.routePoints.length > 0 ? 10 : 5} 
+                    style={{ height: '100%', width: '100%' }}
+                 >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap' />
+                    {reportData.heatPoints.length > 0 && (
+                       <HeatmapLayer
+                          fitBoundsOnLoad
+                          fitBoundsOnUpdate
+                          points={reportData.heatPoints}
+                          longitudeExtractor={m => m[1]}
+                          latitudeExtractor={m => m[0]}
+                          intensityExtractor={m => m[2]}
+                          {...heatmapOptions}
+                       />
+                    )}
+                </MapContainer>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
-// 3. Obtener Distancia Simple
-export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
-    const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
-    return data.totalDistance;
-};
-
-// 4. Mapeo de Flota
-export const matchFleetData = (csvData, gpsAssets) => {
-  const matchedData = [];
-  const csvSummary = {};
-  let minDate = new Date();
-  let maxDate = new Date(0);
-
-  csvData.forEach(row => {
-    if (!csvSummary[row.unidad]) {
-      csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
-    }
-    csvSummary[row.unidad].litros += row.litros;
-    csvSummary[row.unidad].costo += row.costo;
-
-    const rowDate = row.timestamp ? new Date(row.timestamp) : new Date();
-    if (rowDate < minDate) minDate = rowDate;
-    if (rowDate > maxDate) maxDate = rowDate;
-  });
-
-  Object.keys(csvSummary).forEach(unidadCsv => {
-    const csvInfo = csvSummary[unidadCsv];
-    const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    const csvPlaca = clean(csvInfo.placa);
-    const csvUnidad = clean(unidadCsv);
-
-    const gpsAsset = gpsAssets.find(asset => {
-      const gpsPlaca = clean(asset.plate);
-      const gpsName = clean(asset.name);
-
-      if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
-      if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
-      return false;
-    });
-
-    matchedData.push({
-      unidad: unidadCsv,
-      placa: csvInfo.placa,
-      litrosCsv: csvInfo.litros,
-      costoCsv: csvInfo.costo,
-      gpsId: gpsAsset ? gpsAsset.id : null,
-      gpsName: gpsAsset ? gpsAsset.name : null,
-      gpsSearchKey: gpsAsset ? gpsAsset.id : null, // ID numérico para historial
-      gpsDistance: 0,
-      rendimientoReal: 0
-    });
-  });
-
-  return { matchedData, dateRange: { min: minDate, max: maxDate } };
-};
+export default GpsReportPage;
