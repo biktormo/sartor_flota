@@ -6,35 +6,41 @@ export const fetchGpsAssets = async () => {
     const response = await fetch('/api/cybermapa?endpoint=assets');
     
     if (!response.ok) {
-        // Si hay error (ej: 400), intentamos leer el mensaje para mostrarlo en consola
-        try {
-            const errJson = await response.json();
-            console.error("Error API:", errJson);
-        } catch(e) {}
         throw new Error(`Error red: ${response.status}`);
     }
 
     const json = await response.json();
-    console.log("📡 API DATOSACTUALES:", json);
+    console.log("📡 API GETVEHICULOS (RAW):", json);
 
     let rawAssets = [];
 
-    // Estrategias de búsqueda para DATOSACTUALES
-    if (Array.isArray(json)) rawAssets = json;
-    else if (json.datos && Array.isArray(json.datos)) rawAssets = json.datos;
-    else if (json.unidades && Array.isArray(json.unidades)) rawAssets = json.unidades;
-    else if (json.result && Array.isArray(json.result)) rawAssets = json.result;
+    // ESTRATEGIA DE BÚSQUEDA ROBUSTA
+    if (Array.isArray(json)) {
+        rawAssets = json;
+    }
+    else if (json.unidades && Array.isArray(json.unidades)) {
+        rawAssets = json.unidades;
+    }
+    else if (json.datos && Array.isArray(json.datos)) {
+        rawAssets = json.datos;
+    }
+    else if (json.loginPositions && Array.isArray(json.loginPositions)) {
+        rawAssets = json.loginPositions;
+    }
+    else if (json.data) {
+        if (Array.isArray(json.data)) rawAssets = json.data;
+        else if (json.data.units) rawAssets = json.data.units;
+    }
 
     if (rawAssets.length === 0) {
         console.warn("⚠️ Lista vacía.");
     }
 
     return rawAssets.map(asset => ({
-      // Mapeo flexible
-      id: asset.id_gps || asset.id || asset.vehiculo, 
-      name: asset.alias || asset.descripcion || asset.nombre || asset.patente || 'Sin Nombre',
-      plate: asset.patente || asset.plate || '' 
-    })).filter(a => a.id); // Solo devolvemos los que tienen ID
+      id: asset.uID || asset.id || asset.id_gps || asset.unitID,
+      name: asset.n || asset.name || asset.alias || asset.dsc || 'Sin Nombre',
+      plate: asset.p || asset.plate || asset.patente || asset.n || ''
+    })).filter(v => v.id);
 
   } catch (error) {
     console.error("Error GPS Assets:", error);
@@ -42,7 +48,7 @@ export const fetchGpsAssets = async () => {
   }
 };
 
-// 2. Historial (Se mantiene igual)
+// 2. Obtener Historial Completo (Para Mapas y Cálculos)
 export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
   try {
     const format = (d) => {
@@ -50,30 +56,37 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
         return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
     
-    const fromStr = format(dateFrom);
-    const toStr = format(dateTo);
+    const fromDate = new Date(dateFrom); fromDate.setHours(0, 0, 0);
+    const toDate = new Date(dateTo); toDate.setHours(23, 59, 59);
+
+    const fromStr = format(fromDate);
+    const toStr = format(toDate);
     
-    // Importante: Usamos la patente porque así configuramos la función
+    console.log(`📡 Solicitando historial: ${patente}`);
+
     const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
     const json = await response.json();
     
-    console.log("📡 HISTORIAL:", json);
+    console.log("📡 HISTORIAL RECIBIDO:", json);
 
     let totalDistance = 0;
     let routePoints = [];
     
-    // Parseo de Distancia
-    if (json.resumen && json.resumen.distancia) totalDistance = parseFloat(json.resumen.distancia);
-    else if (json.totales && json.totales.distancia) totalDistance = parseFloat(json.totales.distancia);
+    // 1. Distancia en resumen
+    if (json.resumen && json.resumen.distancia) {
+      totalDistance = parseFloat(json.resumen.distancia);
+    } else if (json.totales && json.totales.distancia) {
+      totalDistance = parseFloat(json.totales.distancia);
+    }
 
-    // Parseo de Puntos
-    const dataPoints = json.datos || json.filas || json.result || (Array.isArray(json) ? json : []);
+    // 2. Puntos
+    const dataPoints = json.filas || json.datos || json.result || (Array.isArray(json) ? json : []);
     
     if (dataPoints.length > 0) {
       if (totalDistance === 0) {
-         const last = dataPoints[dataPoints.length-1];
-         if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
-         else if (last.distancia) totalDistance = parseFloat(last.distancia);
+        const lastPoint = dataPoints[dataPoints.length - 1];
+        if (lastPoint.distancia_acumulada) totalDistance = parseFloat(lastPoint.distancia_acumulada);
+        else if (lastPoint.distancia) totalDistance = parseFloat(lastPoint.distancia);
       }
       
       routePoints = dataPoints
@@ -86,7 +99,7 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
     }
 
     return {
-      totalDistance: Math.max(0, totalDistance),
+      totalDistance,
       routePoints,
       heatPoints: routePoints.map(p => [p[0], p[1], 1]), 
     };
@@ -97,49 +110,59 @@ export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
   }
 };
 
-// 3. Mapeo (Se mantiene igual)
+// 3. Obtener Distancia Simple (Wrapper para la página de comparación)
+export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
+    const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
+    return data.totalDistance;
+};
+
+// 4. Algoritmo de Mapeo
 export const matchFleetData = (csvData, gpsAssets) => {
-    // ... (Copia la función matchFleetData de la respuesta anterior si no la tienes, es larga pero no cambió)
-    // Resumida para no ocupar espacio, pero asegura que esté en tu archivo:
-    const matchedData = [];
-    const csvSummary = {};
-    let minDate = new Date();
-    let maxDate = new Date(0);
+  const matchedData = [];
+  const csvSummary = {};
+  let minDate = new Date();
+  let maxDate = new Date(0);
 
-    csvData.forEach(row => {
-        if (!csvSummary[row.unidad]) csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
-        csvSummary[row.unidad].litros += row.litros;
-        csvSummary[row.unidad].costo += row.costo;
-        const rowDate = row.timestamp ? new Date(row.timestamp) : new Date();
-        if (rowDate < minDate) minDate = rowDate;
-        if (rowDate > maxDate) maxDate = rowDate;
+  csvData.forEach(row => {
+    if (!csvSummary[row.unidad]) {
+      csvSummary[row.unidad] = { litros: 0, costo: 0, placa: row.placa };
+    }
+    csvSummary[row.unidad].litros += row.litros;
+    csvSummary[row.unidad].costo += row.costo;
+
+    const rowDate = row.timestamp ? new Date(row.timestamp) : new Date();
+    if (rowDate < minDate) minDate = rowDate;
+    if (rowDate > maxDate) maxDate = rowDate;
+  });
+
+  Object.keys(csvSummary).forEach(unidadCsv => {
+    const csvInfo = csvSummary[unidadCsv];
+    const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const csvPlaca = clean(csvInfo.placa);
+    const csvUnidad = clean(unidadCsv);
+
+    const gpsAsset = gpsAssets.find(asset => {
+      const gpsPlaca = clean(asset.plate);
+      const gpsName = clean(asset.name);
+
+      if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
+      if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
+      
+      return false;
     });
 
-    Object.keys(csvSummary).forEach(unidadCsv => {
-        const csvInfo = csvSummary[unidadCsv];
-        const clean = (s) => (s || '').toString().replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        const csvPlaca = clean(csvInfo.placa);
-        const csvUnidad = clean(unidadCsv);
-
-        const gpsAsset = gpsAssets.find(asset => {
-            const gpsPlaca = clean(asset.plate);
-            const gpsName = clean(asset.name);
-            if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
-            if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
-            return false;
-        });
-
-        matchedData.push({
-            unidad: unidadCsv,
-            placa: csvInfo.placa,
-            litrosCsv: csvInfo.litros,
-            costoCsv: csvInfo.costo,
-            gpsId: gpsAsset ? gpsAsset.id : null,
-            gpsName: gpsAsset ? gpsAsset.name : null,
-            gpsSearchKey: gpsAsset ? (gpsAsset.plate || gpsAsset.id) : null, // ID para búsqueda (corregido asset -> gpsAsset si existe)
-            gpsDistance: 0,
-            rendimientoReal: 0
-        });
+    matchedData.push({
+      unidad: unidadCsv,
+      placa: csvInfo.placa,
+      litrosCsv: csvInfo.litros,
+      costoCsv: csvInfo.costo,
+      gpsId: gpsAsset ? (gpsAsset.id || gpsAsset.plate) : null, 
+      gpsName: gpsAsset ? gpsAsset.name : null,
+      gpsSearchKey: gpsAsset ? (gpsAsset.plate || gpsAsset.id) : null,
+      gpsDistance: 0,
+      rendimientoReal: 0
     });
-    return { matchedData, dateRange: { min: minDate, max: maxDate } };
+  });
+
+  return { matchedData, dateRange: { min: minDate, max: maxDate } };
 };
