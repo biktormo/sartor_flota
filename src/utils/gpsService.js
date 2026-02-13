@@ -1,42 +1,34 @@
 // src/utils/gpsService.js
 
-// Función para calcular distancia entre dos coordenadas (Haversine)
-const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Radio de la tierra en km
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-const deg2rad = (deg) => deg * (Math.PI / 180);
-
-// 1. Obtener lista (Mantiene la lógica que ya funcionó con loginPositions)
+// 1. Obtener lista de vehículos
 export const fetchGpsAssets = async () => {
   try {
     const response = await fetch('/api/cybermapa?endpoint=assets');
     const json = await response.json();
     
-    console.log("📡 API GETVEHICULOS:", json);
+    console.log("📡 API DATOSACTUALES (RAW):", json);
 
-    // Buscamos 'unidades' (que devolvimos desde netlify) o 'loginPositions'
-    const rawAssets = json.unidades || json.loginPositions || [];
+    let rawAssets = [];
+
+    // Estrategia de búsqueda para WService.js
+    if (Array.isArray(json)) {
+        rawAssets = json;
+    } else if (json.datos && Array.isArray(json.datos)) {
+        rawAssets = json.datos;
+    } else if (json.result && Array.isArray(json.result)) {
+        rawAssets = json.result;
+    }
 
     if (rawAssets.length === 0) {
-        console.warn("⚠️ Lista vacía.");
-        return [];
+        console.warn("⚠️ Lista vacía. Ver consola.");
     }
 
     return rawAssets.map(asset => ({
-      // TU CAPTURA DE PANTALLA MOSTRABA ESTOS CAMPOS EN loginPositions:
-      id: asset.gps,         // "86528..."
-      name: asset.alias,     // "MOVIL 25..."
-      plate: asset.patente   // "AA472RQ"
-    }));
+      // Mapeo basado en documentación de StreetZ/WService
+      id: asset.gps || asset.id_gps || asset.id, 
+      name: asset.alias || asset.descripcion || asset.nombre || 'Sin Nombre',
+      plate: asset.patente || asset.placa || '' 
+    })).filter(a => a.id); // Solo devolvemos los que tienen ID
 
   } catch (error) {
     console.error("Error GPS Assets:", error);
@@ -44,9 +36,10 @@ export const fetchGpsAssets = async () => {
   }
 };
 
-// 2. Obtener Historial (ADAPTADO A DOCUMENTACIÓN)
-export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
+// 2. Obtener Historial (Cálculo de Distancia + Puntos)
+export const fetchGpsHistory = async (patente, dateFrom, dateTo) => {
   try {
+    // Formato exacto doc: "yyyy-mm-dd hh:mm:ss"
     const format = (d) => {
         const pad = (n) => n.toString().padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -58,9 +51,9 @@ export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
     const fromStr = format(fromDate);
     const toStr = format(toDate);
     
-    console.log(`📡 Pidiendo Historial ID: ${assetId}`);
+    console.log(`📡 Pidiendo Historial ID: ${patente}`);
 
-    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${assetId}&from=${fromStr}&to=${toStr}`);
+    const response = await fetch(`/api/cybermapa?endpoint=history&patente=${patente}&from=${fromStr}&to=${toStr}`);
     const json = await response.json();
     
     console.log("📡 HISTORIAL RECIBIDO:", json);
@@ -68,13 +61,28 @@ export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
     let totalDistance = 0;
     let routePoints = [];
 
-    // --- PARSEO SEGÚN DOCUMENTACIÓN ---
-    // La documentación dice que el array se llama "posiciones"
-    const dataPoints = json.posiciones || json.datos || [];
+    // --- PARSEO DATOSHISTORICOS ---
+    
+    // 1. Distancia Total (Resumen)
+    if (json.resumen && json.resumen.distancia) {
+      totalDistance = parseFloat(json.resumen.distancia);
+    }
+
+    // 2. Puntos del mapa (Posiciones)
+    // La doc dice 'posiciones', a veces es 'datos'
+    const dataPoints = json.posiciones || json.datos || json.filas || [];
     
     if (Array.isArray(dataPoints) && dataPoints.length > 0) {
       
-      // Mapear Latitud/Longitud
+      // Si no hay resumen, intentamos sacar distancia del último punto
+      if (totalDistance === 0) {
+         const last = dataPoints[dataPoints.length-1];
+         // Buscamos acumulado
+         if (last.distancia_acumulada) totalDistance = parseFloat(last.distancia_acumulada);
+         // O calculamos manual (sumando tramos) - Omitido por simplicidad, priorizamos API
+      }
+
+      // Mapear Latitud/Longitud (latitud/longitud según doc)
       routePoints = dataPoints
         .filter(p => (p.latitud && p.longitud) || (p.lat && p.lon))
         .map(p => {
@@ -82,18 +90,10 @@ export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
             const lng = parseFloat(p.longitud || p.lon);
             return [lat, lng];
         });
-
-      // Calcular distancia total sumando punto a punto
-      for (let i = 0; i < routePoints.length - 1; i++) {
-          totalDistance += getDistanceFromLatLonInKm(
-              routePoints[i][0], routePoints[i][1],
-              routePoints[i+1][0], routePoints[i+1][1]
-          );
-      }
     }
 
     return {
-      totalDistance: Math.round(totalDistance * 10) / 10, // Redondear 1 decimal
+      totalDistance: Math.max(0, totalDistance),
       routePoints,
       heatPoints: routePoints.map(p => [p[0], p[1], 1]), 
     };
@@ -104,13 +104,13 @@ export const fetchGpsHistory = async (assetId, dateFrom, dateTo) => {
   }
 };
 
-// 3. Wrapper Distancia
+// 3. Obtener Distancia Simple
 export const fetchGpsDistance = async (assetId, dateFrom, dateTo) => {
     const data = await fetchGpsHistory(assetId, dateFrom, dateTo);
     return data.totalDistance;
 };
 
-// 4. Mapeo (Se mantiene igual)
+// 4. Mapeo de Flota
 export const matchFleetData = (csvData, gpsAssets) => {
   const matchedData = [];
   const csvSummary = {};
@@ -138,6 +138,7 @@ export const matchFleetData = (csvData, gpsAssets) => {
     const gpsAsset = gpsAssets.find(asset => {
       const gpsPlaca = clean(asset.plate);
       const gpsName = clean(asset.name);
+
       if (gpsPlaca.length > 2 && csvPlaca.length > 2 && gpsPlaca === csvPlaca) return true;
       if (csvUnidad.length > 0 && gpsName.includes(csvUnidad)) return true;
       return false;
@@ -148,9 +149,9 @@ export const matchFleetData = (csvData, gpsAssets) => {
       placa: csvInfo.placa,
       litrosCsv: csvInfo.litros,
       costoCsv: csvInfo.costo,
-      gpsId: gpsAsset ? asset.id : null, // ID numérico
+      gpsId: gpsAsset ? gpsAsset.id : null,
       gpsName: gpsAsset ? gpsAsset.name : null,
-      gpsSearchKey: gpsAsset ? asset.id : null,
+      gpsSearchKey: gpsAsset ? gpsAsset.id : null, // ID numérico para historial
       gpsDistance: 0,
       rendimientoReal: 0
     });

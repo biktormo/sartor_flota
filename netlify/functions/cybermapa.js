@@ -1,87 +1,61 @@
 export const handler = async (event, context) => {
+  // URL OFICIAL DE LA API (Según documentación WService)
+  const API_URL = 'https://gps.commers.com.ar/API/WService.js';
+  
   const USER = process.env.CYBERMAPA_USER;
   const PASS = process.env.CYBERMAPA_PASS;
 
-  if (!USER || !PASS) return { statusCode: 500, body: "Faltan credenciales" };
+  if (!USER || !PASS) return { statusCode: 500, body: JSON.stringify({ error: "Faltan credenciales" }) };
 
   const { endpoint, from, to, patente } = event.queryStringParameters;
 
-  let targetUrl = '';
-  let bodyPayload = {};
-  let headers = {
-    'Content-Type': 'application/json'
+  // Payload Base
+  let bodyPayload = {
+    user: USER,
+    pwd: PASS
   };
 
-  // 1. LISTA DE VEHÍCULOS (Estrategia: main.jss / INITIALIZE)
-  // Usamos esta porque ya confirmamos que te devuelve el array 'loginPositions'
+  // --- 1. LISTA DE VEHÍCULOS ---
   if (endpoint === 'assets') {
-    targetUrl = 'https://gps.commers.com.ar/StreetZ/server/scripts/main/main.jss';
-    
-    // Headers necesarios para main.jss
-    headers['Referer'] = 'https://gps.commers.com.ar/StreetZ/';
-    headers['Origin'] = 'https://gps.commers.com.ar';
-    headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-    bodyPayload = {
-      FUNC: "INITIALIZE",
-      paramsData: { auditReEntry: true },
-      pr: "https:",
-      session: {
-        user: USER,
-        pwd: PASS,
-        lang: "es",
-        production: 1,
-        temporalInvitationModeEnabled: 0,
-        trackerModeEnabled: 0
-      }
-    };
+    // Usamos DATOSACTUALES como indica la documentación oficial
+    bodyPayload.action = 'DATOSACTUALES';
   } 
   
-  // 2. HISTORIAL (Estrategia: WService.js / DATOSHISTORICOS)
-  // Ajustado estrictamente a tu imagen de documentación
+  // --- 2. HISTORIAL ---
   else if (endpoint === 'history') {
-    targetUrl = 'https://gps.commers.com.ar/API/WService.js';
-    
-    bodyPayload = {
-      action: "DATOSHISTORICOS",
-      user: USER,
-      pwd: PASS,
-      vehiculo: patente, // Enviaremos el ID numérico (gps)
-      tipoID: "gps",     // Especificamos que enviamos el ID de GPS
-      desde: from,
-      hasta: to
-      // numpag: 1 (Podríamos paginar en el futuro, por ahora pedimos la 1)
-    };
+    bodyPayload.action = 'DATOSHISTORICOS';
+    bodyPayload.vehiculo = patente; // Enviamos el ID numérico (gps)
+    bodyPayload.tipoID = 'gps';     // Importante: tipoID 'gps' para ID numérico
+    bodyPayload.desde = from;
+    bodyPayload.hasta = to;
   }
 
   try {
-    const response = await fetch(targetUrl, {
+    const response = await fetch(API_URL, {
       method: 'POST',
-      headers: headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bodyPayload)
     });
 
     if (!response.ok) {
       const text = await response.text();
-      return { statusCode: response.status, body: `Error Servidor: ${text}` };
+      return { statusCode: response.status, body: `Error API: ${text}` };
     }
 
     const data = await response.json();
 
-    // Limpieza para el frontend
-    let finalResponse = data;
-
-    // Si es assets (INITIALIZE), extraemos solo la lista
-    if (endpoint === 'assets') {
-        if (data.loginPositions) {
-            finalResponse = { unidades: data.loginPositions };
-        }
+    // Verificación de errores lógicos de la API
+    if (data.status === 'rechazado' || data.error) {
+       console.log("Error API Lógico:", data);
+       // Si DATOSACTUALES falla, un último intento sería LISTAUNIDADES, 
+       // pero la doc dice DATOSACTUALES.
+       return { statusCode: 400, body: JSON.stringify(data) };
     }
 
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify(finalResponse)
+      body: JSON.stringify(data)
     };
 
   } catch (error) {
